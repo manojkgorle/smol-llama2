@@ -222,6 +222,7 @@ class Tokenizer:
                 f"Tokenizer model not found: {model_path}\n"
                 f"Train one first with: python scripts/train_tokenizer.py"
             )
+        self.model_path = model_path
         self._sp = spm.SentencePieceProcessor()
         self._sp.Load(model_path)
 

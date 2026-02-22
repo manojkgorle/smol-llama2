@@ -51,15 +51,49 @@ RANDOM WINDOW SAMPLING:
   doesn't overfit to specific story alignments.
 """
 
+import multiprocessing as mp
 import os
 from typing import Optional
 
 import numpy as np
+import sentencepiece as spm
 import torch
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 
 from llama_vc.tokenizer import Tokenizer
+
+
+# --- Parallel tokenization helpers ---
+# These must be module-level for multiprocessing pickling.
+
+def _init_tokenize_worker(model_path: str):
+    """Initialize a SentencePiece model in each worker process."""
+    global _worker_sp
+    _worker_sp = spm.SentencePieceProcessor()
+    _worker_sp.Load(model_path)
+
+
+def _tokenize_chunk(lines: list[str]) -> np.ndarray:
+    """Tokenize a chunk of text lines. Runs in a worker process."""
+    global _worker_sp
+    eos_id = _worker_sp.eos_id()
+
+    # Filter empty lines
+    texts = [line.strip() for line in lines]
+    texts = [t for t in texts if t]
+    if not texts:
+        return np.array([], dtype=np.uint16)
+
+    # Batch encode (single C++ call for all texts — much faster than one-by-one)
+    encoded = _worker_sp.Encode(texts)
+
+    # Flatten with EOS after each story
+    tokens = []
+    for ids in encoded:
+        tokens.extend(ids)
+        tokens.append(eos_id)
+    return np.array(tokens, dtype=np.uint16)
 
 
 def download_tinystories(data_dir: str) -> str:
@@ -159,42 +193,44 @@ def tokenize_and_save(
 
     print(f"Tokenizing {text_file} → {output_bin}")
 
-    # First pass: count lines for progress bar
-    with open(text_file, "r", encoding="utf-8") as f:
-        n_lines = sum(1 for _ in f)
-    print(f"  {n_lines:,} lines to tokenize")
-
-    # Second pass: tokenize and collect tokens
-    # We accumulate tokens in a list and periodically flush to disk.
-    # For TinyStories (~2M stories), all tokens fit in RAM (~600MB as uint16).
-    all_tokens = []
-
-    with open(text_file, "r", encoding="utf-8") as f:
-        for line in tqdm(f, total=n_lines, desc="Tokenizing"):
-            text = line.strip()
-            if not text:
-                continue
-
-            # Encode without BOS, with EOS (EOS separates stories)
-            tokens = tokenizer.encode(text, bos=False, eos=True)
-            all_tokens.extend(tokens)
-
-    # Convert to numpy array and save
-    token_array = np.array(all_tokens, dtype=np.uint16)
-
     # Verify no overflow (uint16 max = 65535)
     assert tokenizer.vocab_size <= 65535, (
         f"vocab_size {tokenizer.vocab_size} exceeds uint16 max (65535)"
     )
 
-    # Save as binary file using numpy's tofile
+    # Read all lines into memory (single pass — ~1.8GB for TinyStories, fits in RAM)
+    print("  Reading text file...")
+    with open(text_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    print(f"  {len(lines):,} lines to tokenize")
+
+    # Split into chunks for parallel processing
+    chunks = [lines[i:i + chunk_size] for i in range(0, len(lines), chunk_size)]
+    del lines  # Free memory
+
+    # Tokenize in parallel using multiple worker processes.
+    # Each worker loads its own SentencePiece model and batch-encodes a chunk.
+    # Results stream directly to disk — no need to hold all tokens in RAM.
+    num_workers = os.cpu_count() or 4
+    print(f"  Using {num_workers} workers, {len(chunks)} chunks")
+
     os.makedirs(os.path.dirname(output_bin) or ".", exist_ok=True)
-    token_array.tofile(output_bin)
+    total_tokens = 0
+
+    with mp.Pool(num_workers, initializer=_init_tokenize_worker, initargs=(tokenizer.model_path,)) as pool:
+        with open(output_bin, "wb") as f_out:
+            for token_array in tqdm(
+                pool.imap(_tokenize_chunk, chunks),
+                total=len(chunks),
+                desc="Tokenizing",
+            ):
+                token_array.tofile(f_out)
+                total_tokens += len(token_array)
 
     file_size_mb = os.path.getsize(output_bin) / 1024**2
-    print(f"  Saved: {output_bin} ({len(token_array):,} tokens, {file_size_mb:.1f} MB)")
+    print(f"  Saved: {output_bin} ({total_tokens:,} tokens, {file_size_mb:.1f} MB)")
 
-    return len(token_array)
+    return total_tokens
 
 
 def prepare_data(
