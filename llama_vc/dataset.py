@@ -74,25 +74,46 @@ def _init_tokenize_worker(model_path: str):
     _worker_sp.Load(model_path)
 
 
-def _tokenize_chunk(lines: list[str]) -> np.ndarray:
-    """Tokenize a chunk of text lines. Runs in a worker process."""
+def _tokenize_file_range(args: tuple[str, int, int]) -> np.ndarray:
+    """
+    Read and tokenize a byte range of a text file. Runs in a worker process.
+
+    Each worker opens the file directly and seeks to its assigned byte range,
+    avoiding the need to send text data through IPC pipes.
+    """
     global _worker_sp
+    text_file, start_byte, end_byte = args
     eos_id = _worker_sp.eos_id()
 
-    # Filter empty lines
-    texts = [line.strip() for line in lines]
-    texts = [t for t in texts if t]
-    if not texts:
-        return np.array([], dtype=np.uint16)
+    tokens: list[int] = []
 
-    # Batch encode (single C++ call for all texts — much faster than one-by-one)
-    encoded = _worker_sp.Encode(texts)
+    with open(text_file, "rb") as f:
+        if start_byte > 0:
+            f.seek(start_byte)
+            f.readline()  # align to next complete line
 
-    # Flatten with EOS after each story
-    tokens = []
-    for ids in encoded:
-        tokens.extend(ids)
-        tokens.append(eos_id)
+        batch: list[str] = []
+        while f.tell() <= end_byte:
+            line = f.readline()
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").strip()
+            if text:
+                batch.append(text)
+
+            # Batch encode every 10K lines (one C++ call instead of 10K)
+            if len(batch) >= 10000:
+                for ids in _worker_sp.Encode(batch):
+                    tokens.extend(ids)
+                    tokens.append(eos_id)
+                batch = []
+
+        # Encode remaining
+        if batch:
+            for ids in _worker_sp.Encode(batch):
+                tokens.extend(ids)
+                tokens.append(eos_id)
+
     return np.array(tokens, dtype=np.uint16)
 
 
@@ -162,25 +183,18 @@ def tokenize_and_save(
     text_file: str,
     output_bin: str,
     tokenizer: Tokenizer,
-    chunk_size: int = 10000,
 ) -> int:
     """
     Tokenize a text file and save as a memory-mapped binary file.
 
-    PROCESS:
-      1. Read the text file line by line (each line = one story)
-      2. Tokenize each story, appending EOS between stories
-      3. Write token IDs to a binary file as uint16 values
-
-    The resulting file is a flat array of token IDs that represents
-    ALL stories concatenated together.
+    Uses multiprocessing for speed: the file is split into byte ranges
+    and each worker reads/tokenizes its range directly from disk.
+    No text data is sent through IPC pipes.
 
     Args:
         text_file: Path to the plain text file (one story per line).
         output_bin: Path for the output binary file.
         tokenizer: Trained tokenizer for encoding text.
-        chunk_size: Number of stories to process before flushing to disk.
-                   Larger = faster but uses more RAM temporarily.
 
     Returns:
         Total number of tokens written.
@@ -198,21 +212,21 @@ def tokenize_and_save(
         f"vocab_size {tokenizer.vocab_size} exceeds uint16 max (65535)"
     )
 
-    # Read all lines into memory (single pass — ~1.8GB for TinyStories, fits in RAM)
-    print("  Reading text file...")
-    with open(text_file, "r", encoding="utf-8") as f:
-        lines = f.readlines()
-    print(f"  {len(lines):,} lines to tokenize")
-
-    # Split into chunks for parallel processing
-    chunks = [lines[i:i + chunk_size] for i in range(0, len(lines), chunk_size)]
-    del lines  # Free memory
-
-    # Tokenize in parallel using multiple worker processes.
-    # Each worker loads its own SentencePiece model and batch-encodes a chunk.
-    # Results stream directly to disk — no need to hold all tokens in RAM.
+    # Split the file into byte ranges for parallel processing.
+    # Workers read directly from the file (no data sent through IPC pipes).
+    file_size = os.path.getsize(text_file)
     num_workers = os.cpu_count() or 4
-    print(f"  Using {num_workers} workers, {len(chunks)} chunks")
+    n_chunks = num_workers * 4  # more chunks than workers for progress granularity
+
+    chunk_bytes = file_size // n_chunks
+    ranges = []
+    for i in range(n_chunks):
+        start = i * chunk_bytes
+        end = file_size if i == n_chunks - 1 else (i + 1) * chunk_bytes
+        ranges.append((text_file, start, end))
+
+    print(f"  File size: {file_size / 1024**2:.1f} MB")
+    print(f"  Using {num_workers} workers, {n_chunks} chunks")
 
     os.makedirs(os.path.dirname(output_bin) or ".", exist_ok=True)
     total_tokens = 0
@@ -220,8 +234,8 @@ def tokenize_and_save(
     with mp.Pool(num_workers, initializer=_init_tokenize_worker, initargs=(tokenizer.model_path,)) as pool:
         with open(output_bin, "wb") as f_out:
             for token_array in tqdm(
-                pool.imap(_tokenize_chunk, chunks),
-                total=len(chunks),
+                pool.imap(_tokenize_file_range, ranges),
+                total=n_chunks,
                 desc="Tokenizing",
             ):
                 token_array.tofile(f_out)
