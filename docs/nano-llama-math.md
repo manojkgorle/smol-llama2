@@ -453,6 +453,10 @@ $$\theta_i = \frac{1}{10000^{\,2i/64}}, \quad i = 0, 1, \ldots, 31$$
 
 The frequencies form a geometric progression from $\theta_0 = 1.0$ (fast rotation, encoding fine-grained local position) down to $\theta_{31} = 1/10000 \approx 0.0001$ (extremely slow rotation, encoding long-range position). Together they give the model a rich, multi-scale sense of where every token sits relative to every other. Our single-frequency nano model captures the full principle in its simplest form.
 
+<p align="center">
+  <img src="img/rope_rotation.svg" alt="RoPE: Same vector rotated to different positions" width="560">
+</p>
+
 ---
 
 ### 3c. Computing Attention Scores
@@ -506,6 +510,10 @@ The attention weights for "cat":
 | "cat" | $0.652$ (65.2%) |
 
 "cat" pays about two-thirds of its attention to itself and one-third to "the." This ratio is entirely determined by the learned $W_Q$ and $W_K$ matrices and the RoPE-induced rotation -- different weights would yield a different split.
+
+<p align="center">
+  <img src="img/attention_weights.svg" alt="Causal attention scores and weights for 'the cat'" width="700">
+</p>
 
 ---
 
@@ -671,6 +679,10 @@ Input x:  -2.0   -1.0    0.0    0.5    1.0    2.0    3.0
 ReLU(x):   0.0    0.0    0.0    0.5    1.0    2.0    3.0   <-- hard cutoff at 0
 SiLU(x): -0.24  -0.27   0.00   0.31   0.73   1.76   2.86  <-- smooth, allows small negatives
 ```
+
+<p align="center">
+  <img src="img/silu_vs_relu.svg" alt="SiLU vs ReLU activation functions" width="600">
+</p>
 
 Three properties stand out:
 

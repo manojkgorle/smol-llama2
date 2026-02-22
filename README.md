@@ -1,5 +1,7 @@
 # llama-vc
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/manojkgorle/smol-llama2)
+
 A complete, educational implementation of a **LLaMA-style language model** (~15.74M parameters) built from scratch in pure PyTorch. Trains on [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) and generates coherent short stories.
 
 This project implements every component of the LLaMA architecture — RMSNorm, Rotary Positional Embeddings, SwiGLU, Grouped Query Attention, KV cache — with no external model libraries. Every module is heavily commented and designed for learning.
