@@ -1,6 +1,6 @@
 # Data files (large, downloaded/generated)
 data/
-checkpoints/
+checkpoints*/
 logs/
 
 # Python

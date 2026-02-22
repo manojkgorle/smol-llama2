@@ -250,10 +250,10 @@ class TrainConfig:
     Steps for 1 epoch: 300M / 131K ≈ 2,290 steps
     10,000 steps ≈ 4.4 epochs
 
-    Estimated wall time:
-      MPS (M4 Pro):  ~20K-40K tokens/sec → ~55-110 min
-      CUDA (T4):     ~50K-100K tokens/sec → ~20-40 min
-      CUDA (A100):   ~200K-400K tokens/sec → ~5-10 min
+    Measured wall time:
+      CUDA (A100):   ~15 min
+      MPS (M4 Pro):  ~3.5 hours
+      CUDA (T4):     OOM at default settings — reduce batch_size/grad_accum
     """
 
     # ── Batch Size ─────────────────────────────────────────────────────────

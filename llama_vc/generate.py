@@ -59,6 +59,9 @@ SAMPLING STRATEGIES:
   Applied in order: temperature → top-k → top-p → sample
 """
 
+import time
+from dataclasses import dataclass
+
 import torch
 import torch.nn.functional as F
 from typing import Optional
@@ -66,6 +69,55 @@ from typing import Optional
 from llama_vc.config import ModelConfig
 from llama_vc.model import LLaMA
 from llama_vc.tokenizer import Tokenizer
+
+
+@dataclass
+class GenerateResult:
+    """Result of text generation with inference metrics."""
+    text: str
+    prompt_tokens: int      # number of tokens in the prompt (including BOS)
+    generated_tokens: int   # number of tokens generated
+    prefill_ms: float       # time to process the prompt (ms)
+    decode_ms: float        # time spent in the decode loop (ms)
+    total_ms: float         # total wall time (ms)
+    peak_memory_mb: float   # peak GPU memory during generation (0 if CPU)
+    temperature: float      # sampling temperature used
+    top_k: int              # top-k value used
+    top_p: float            # top-p value used
+
+    @property
+    def ttft_ms(self) -> float:
+        """Time to first token — same as prefill time."""
+        return self.prefill_ms
+
+    @property
+    def decode_tok_per_sec(self) -> float:
+        """Decode throughput (tokens/sec), excluding prefill."""
+        if self.decode_ms <= 0:
+            return 0.0
+        return self.generated_tokens / (self.decode_ms / 1000)
+
+    @property
+    def overall_tok_per_sec(self) -> float:
+        """Overall throughput including prefill."""
+        if self.total_ms <= 0:
+            return 0.0
+        return self.generated_tokens / (self.total_ms / 1000)
+
+    def stats_string(self) -> str:
+        """Formatted summary of inference metrics."""
+        lines = [
+            f"Sampling       : temp={self.temperature}, top_k={self.top_k}, top_p={self.top_p}",
+            f"Prompt tokens  : {self.prompt_tokens}",
+            f"Output tokens  : {self.generated_tokens}",
+            f"TTFT           : {self.ttft_ms:.1f} ms",
+            f"Decode speed   : {self.decode_tok_per_sec:.1f} tok/s",
+            f"Overall speed  : {self.overall_tok_per_sec:.1f} tok/s",
+            f"Total time     : {self.total_ms:.1f} ms",
+        ]
+        if self.peak_memory_mb > 0:
+            lines.append(f"Peak GPU mem   : {self.peak_memory_mb:.1f} MB")
+        return "\n".join(lines)
 
 
 def sample_top_p(probs: torch.Tensor, p: float) -> torch.Tensor:
@@ -123,8 +175,8 @@ def sample_top_p(probs: torch.Tensor, p: float) -> torch.Tensor:
     # Sample from filtered distribution
     sampled_idx = torch.multinomial(probs_sorted, num_samples=1)
 
-    # Map back to original indices
-    return sorted_indices[sampled_idx]
+    # Map back to original indices (squeeze to scalar for consistency)
+    return sorted_indices[sampled_idx].squeeze(0)
 
 
 @torch.inference_mode()
@@ -169,12 +221,19 @@ def generate(
         device: Device to run on. If None, uses model's device.
 
     Returns:
-        Generated text (prompt + generated continuation).
+        GenerateResult with generated text and inference metrics.
     """
     model.eval()
 
     if device is None:
         device = next(model.parameters()).device
+
+    # Track peak GPU memory if on CUDA
+    use_cuda = device.type == "cuda"
+    if use_cuda:
+        torch.cuda.reset_peak_memory_stats(device)
+
+    t_start = time.perf_counter()
 
     # ── Step 1: Encode the prompt ──────────────────────────────────────────
     # BOS (Beginning Of Sequence) signals to the model that this is the start
@@ -193,6 +252,10 @@ def generate(
     logits, _, kv_caches = model(tokens, kv_caches=[None] * n_layers, start_pos=0)
     # logits shape: (1, prompt_len, vocab_size)
     # kv_caches: list of (K, V) per layer, K/V shape: (1, prompt_len, n_kv_heads, head_dim)
+
+    if use_cuda:
+        torch.cuda.synchronize(device)
+    t_prefill = time.perf_counter()
 
     # We only need logits at the LAST position (for predicting the next token)
     next_logits = logits[:, -1, :]  # (1, vocab_size)
@@ -226,12 +289,35 @@ def generate(
         next_logits = logits[:, -1, :]  # (1, vocab_size)
         cur_pos += 1
 
+    if use_cuda:
+        torch.cuda.synchronize(device)
+    t_end = time.perf_counter()
+
     # ── Step 5: Decode generated tokens back to text ───────────────────────
     # Combine prompt tokens (without BOS) and generated tokens
     all_tokens = prompt_tokens[1:] + generated_tokens  # Skip BOS for clean output
     generated_text = tokenizer.decode(all_tokens)
 
-    return generated_text
+    # ── Collect metrics ────────────────────────────────────────────────────
+    prefill_ms = (t_prefill - t_start) * 1000
+    decode_ms = (t_end - t_prefill) * 1000
+    total_ms = (t_end - t_start) * 1000
+    peak_memory_mb = 0.0
+    if use_cuda:
+        peak_memory_mb = torch.cuda.max_memory_allocated(device) / 1024**2
+
+    return GenerateResult(
+        text=generated_text,
+        prompt_tokens=prompt_len,
+        generated_tokens=len(generated_tokens),
+        prefill_ms=prefill_ms,
+        decode_ms=decode_ms,
+        total_ms=total_ms,
+        peak_memory_mb=peak_memory_mb,
+        temperature=temperature,
+        top_k=top_k,
+        top_p=top_p,
+    )
 
 
 def _sample_token(
@@ -348,7 +434,7 @@ def generate_batch(
         device: Compute device.
 
     Returns:
-        List of generated texts (one per prompt).
+        List of GenerateResult (one per prompt).
     """
     results = []
     for prompt in prompts:

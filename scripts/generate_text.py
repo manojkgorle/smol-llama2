@@ -24,7 +24,6 @@ WHAT THIS SCRIPT DOES:
 import os
 import sys
 import argparse
-import time
 
 import torch
 
@@ -101,7 +100,6 @@ def interactive_loop(
             continue
 
         # Generate text
-        start_time = time.perf_counter()
         result = generate(
             model=model,
             tokenizer=tokenizer,
@@ -112,16 +110,9 @@ def interactive_loop(
             top_p=args.top_p,
             device=device,
         )
-        elapsed = time.perf_counter() - start_time
 
-        # Count generated tokens (approximate)
-        prompt_tokens = tokenizer.encode(prompt, bos=True, eos=False)
-        total_tokens = tokenizer.encode(result, bos=False, eos=False)
-        n_generated = len(total_tokens) - len(prompt_tokens) + 1
-
-        print(f"\n{result}")
-        print(f"\n--- {n_generated} tokens in {elapsed:.2f}s "
-              f"({n_generated/elapsed:.1f} tok/s) ---\n")
+        print(f"\n{result.text}")
+        print(f"\n--- {result.stats_string()} ---\n")
 
 
 def main():
@@ -174,7 +165,6 @@ def main():
 
     if args.prompt:
         # Single prompt mode
-        start_time = time.perf_counter()
         result = generate(
             model=model,
             tokenizer=tokenizer,
@@ -185,9 +175,8 @@ def main():
             top_p=args.top_p,
             device=device,
         )
-        elapsed = time.perf_counter() - start_time
-        print(f"\n{result}")
-        print(f"\n--- Generated in {elapsed:.2f}s ---")
+        print(f"\n{result.text}")
+        print(f"\n{result.stats_string()}")
     else:
         # Interactive mode
         interactive_loop(model, tokenizer, device, args)

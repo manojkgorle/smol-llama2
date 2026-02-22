@@ -519,6 +519,16 @@ def train(
     )
     logger.log_eval(train_config.max_steps, val_loss)
 
+    # Update best checkpoint if final eval is the best
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        best_path = os.path.join(train_config.checkpoint_dir, "best.pt")
+        save_checkpoint(
+            model, optimizer, train_config.max_steps, val_loss,
+            model_config.to_dict(), train_config.to_dict(),
+            best_path,
+        )
+
     logger.log_info("Training complete!")
     logger.log_info(f"Best validation loss: {best_val_loss:.4f}")
     logger.log_info(
