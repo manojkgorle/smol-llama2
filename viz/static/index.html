@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLaMA-2 Mechanistic Interpretability</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+    <nav id="main-nav">
+        <div class="nav-title">LLaMA-2 Interpretability</div>
+        <div class="nav-tabs">
+            <button class="nav-btn active" data-tab="dashboard">Training Dashboard</button>
+            <button class="nav-btn" data-tab="attention">Attention Inspector</button>
+            <button class="nav-btn" data-tab="activations">Activation Explorer</button>
+            <button class="nav-btn" data-tab="attribution">Logit Attribution</button>
+            <button class="nav-btn" data-tab="circuits">Circuits</button>
+            <button class="nav-btn" data-tab="captum">Captum Attribution</button>
+        </div>
+    </nav>
+
+    <main id="app-container">
+        <section id="tab-dashboard" class="tab-content active">
+            <div id="dashboard-stats" class="stat-cards"></div>
+            <div id="dashboard-charts" class="chart-grid"></div>
+        </section>
+
+        <section id="tab-attention" class="tab-content">
+            <div id="attention-controls" class="controls-bar"></div>
+            <div id="attention-view" class="chart-area"></div>
+        </section>
+
+        <section id="tab-activations" class="tab-content">
+            <div id="activations-controls" class="controls-bar"></div>
+            <div id="activations-charts" class="chart-grid"></div>
+        </section>
+
+        <section id="tab-attribution" class="tab-content">
+            <div id="attribution-controls" class="controls-bar"></div>
+            <div id="attribution-token-strip" class="token-strip"></div>
+            <div id="attribution-detail" class="chart-grid"></div>
+        </section>
+
+        <section id="tab-circuits" class="tab-content">
+            <div id="circuits-container"></div>
+        </section>
+
+        <section id="tab-captum" class="tab-content">
+            <div id="captum-controls" class="controls-bar"></div>
+            <div id="captum-results" class="chart-grid"></div>
+        </section>
+    </main>
+
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/dashboard.js"></script>
+    <script src="/static/js/attention.js"></script>
+    <script src="/static/js/activations.js"></script>
+    <script src="/static/js/attribution.js"></script>
+    <script src="/static/js/circuits.js"></script>
+    <script src="/static/js/captum.js"></script>
+</body>
+</html>
