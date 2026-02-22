@@ -1,9 +1,17 @@
 """
-Data pipeline for training: download, tokenize, and serve TinyStories data.
+Data pipeline for training: download, tokenize, and serve datasets.
+
+Supports multiple datasets via a registry pattern:
+  - TinyStories: ~2.1M short stories (default)
+  - GSM8K: 8.5K grade school math word problems
+  - SimpleMath: 100K basic arithmetic problems
+  - AQUA-RAT: 98K word problems with reasoning
+
+Each dataset can be used independently or combined into a "mixed" dataset.
 
 This module handles the complete data lifecycle:
-  1. Download TinyStories from HuggingFace
-  2. Tokenize all stories using our trained BPE tokenizer
+  1. Download datasets from HuggingFace
+  2. Tokenize using our trained BPE tokenizer
   3. Save tokenized data as memory-mapped binary files
   4. Serve random sequence chunks to the training loop via DataLoader
 
@@ -424,3 +432,258 @@ def create_dataloader(
         pin_memory=pin_memory,
         drop_last=True,  # Drop incomplete last batch (simplifies training loop)
     )
+
+
+# ---------------------------------------------------------------------------
+# Multi-dataset support
+# ---------------------------------------------------------------------------
+
+def _format_tinystories(example: dict) -> str:
+    """Format a TinyStories example as plain text."""
+    return example["text"].strip()
+
+
+def _format_gsm8k(example: dict) -> str:
+    """Format a GSM8K example as 'Question: ... Answer: ...'."""
+    return f"Question: {example['question'].strip()}\nAnswer: {example['answer'].strip()}"
+
+
+def _format_simplemath(example: dict) -> str:
+    """Format a SimpleMath example as 'problem Answer: answer'."""
+    return f"{str(example['problem']).strip()}\nAnswer: {str(example['answer']).strip()}"
+
+
+def _format_aqua_rat(example: dict) -> str:
+    """Format an AQUA-RAT example with question, options, rationale, answer."""
+    options = example["options"]
+    if isinstance(options, list):
+        options = ", ".join(options)
+    return (
+        f"Question: {example['question'].strip()}\n"
+        f"Options: {options}\n"
+        f"Rationale: {example['rationale'].strip()}\n"
+        f"Answer: {example['correct'].strip()}"
+    )
+
+
+# Registry of supported datasets.
+# Each entry has:
+#   hf_path:      HuggingFace dataset identifier
+#   hf_config:    Optional config name (e.g. "main" for GSM8K)
+#   train_split:  Name of the training split
+#   val_split:    Name of the validation split (None = auto-create from train)
+#   val_fraction: Fraction of train to hold out when val_split is None
+#   format_fn:    Callable that converts one HF example to a text string
+DATASETS: dict[str, dict] = {
+    "tinystories": {
+        "hf_path": "roneneldan/TinyStories",
+        "hf_config": None,
+        "train_split": "train",
+        "val_split": "validation",
+        "val_fraction": 0.0,
+        "format_fn": _format_tinystories,
+    },
+    "gsm8k": {
+        "hf_path": "openai/gsm8k",
+        "hf_config": "main",
+        "train_split": "train",
+        "val_split": "test",  # GSM8K has no validation split; use test
+        "val_fraction": 0.0,
+        "format_fn": _format_gsm8k,
+    },
+    "simplemath": {
+        "hf_path": "ProCreations/SimpleMath",
+        "hf_config": None,
+        "train_split": "train",
+        "val_split": None,  # No val split — auto-create 90/10
+        "val_fraction": 0.1,
+        "format_fn": _format_simplemath,
+    },
+    "aqua_rat": {
+        "hf_path": "deepmind/aqua_rat",
+        "hf_config": None,
+        "train_split": "train",
+        "val_split": "validation",
+        "val_fraction": 0.0,
+        "format_fn": _format_aqua_rat,
+    },
+}
+
+# All dataset names (convenience for CLI choices)
+DATASET_NAMES = list(DATASETS.keys())
+
+
+def _export_split(dataset, format_fn, output_path: str, desc: str = "Exporting") -> int:
+    """Export a HuggingFace dataset split to a text file, one example per line."""
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    count = 0
+    with open(output_path, "w", encoding="utf-8") as f:
+        for example in tqdm(dataset, desc=desc):
+            text = format_fn(example)
+            if text:
+                f.write(text + "\n")
+                count += 1
+    return count
+
+
+def download_dataset(
+    name: str,
+    data_dir: str,
+    max_examples: int = -1,
+) -> tuple[str, str]:
+    """
+    Download a dataset from HuggingFace and export train/val text files.
+
+    Each dataset is stored in its own subdirectory: {data_dir}/{name}/
+
+    Args:
+        name: Dataset name (key in DATASETS registry).
+        data_dir: Base data directory.
+        max_examples: Max examples per split (-1 = all).
+
+    Returns:
+        Tuple of (train_txt_path, val_txt_path).
+    """
+    from datasets import load_dataset as hf_load_dataset
+
+    if name not in DATASETS:
+        raise ValueError(
+            f"Unknown dataset '{name}'. Available: {DATASET_NAMES}"
+        )
+
+    cfg = DATASETS[name]
+    ds_dir = os.path.join(data_dir, name)
+    os.makedirs(ds_dir, exist_ok=True)
+    train_txt = os.path.join(ds_dir, "train.txt")
+    val_txt = os.path.join(ds_dir, "val.txt")
+
+    # Return early if both text files already exist
+    if os.path.exists(train_txt) and os.path.exists(val_txt):
+        print(f"[{name}] Text files already exist: {ds_dir}/")
+        return train_txt, val_txt
+
+    print(f"[{name}] Downloading from {cfg['hf_path']}...")
+    load_args = {"path": cfg["hf_path"]}
+    if cfg["hf_config"]:
+        load_args["name"] = cfg["hf_config"]
+
+    # Load train split
+    train_ds = hf_load_dataset(**load_args, split=cfg["train_split"])
+    if max_examples > 0:
+        train_ds = train_ds.select(range(min(max_examples, len(train_ds))))
+
+    # Load or create validation split
+    if cfg["val_split"] is not None:
+        val_ds = hf_load_dataset(**load_args, split=cfg["val_split"])
+        if max_examples > 0:
+            val_ds = val_ds.select(range(min(max_examples, len(val_ds))))
+    else:
+        # No val split available — create one from train
+        frac = cfg["val_fraction"]
+        split = train_ds.train_test_split(test_size=frac, seed=42)
+        train_ds = split["train"]
+        val_ds = split["test"]
+
+    print(f"[{name}] Train: {len(train_ds):,} examples, Val: {len(val_ds):,} examples")
+
+    # Export to text files
+    if not os.path.exists(train_txt):
+        n = _export_split(train_ds, cfg["format_fn"], train_txt, desc=f"[{name}] train")
+        size_mb = os.path.getsize(train_txt) / 1024**2
+        print(f"[{name}] Saved {n:,} train examples ({size_mb:.1f} MB)")
+
+    if not os.path.exists(val_txt):
+        n = _export_split(val_ds, cfg["format_fn"], val_txt, desc=f"[{name}] val")
+        size_mb = os.path.getsize(val_txt) / 1024**2
+        print(f"[{name}] Saved {n:,} val examples ({size_mb:.1f} MB)")
+
+    return train_txt, val_txt
+
+
+def prepare_dataset(
+    name: str,
+    data_dir: str,
+    tokenizer: Tokenizer,
+) -> tuple[str, str]:
+    """
+    Download, export, and tokenize a single dataset.
+
+    Args:
+        name: Dataset name (key in DATASETS registry).
+        data_dir: Base data directory.
+        tokenizer: Trained tokenizer.
+
+    Returns:
+        Tuple of (train_bin_path, val_bin_path).
+    """
+    train_txt, val_txt = download_dataset(name, data_dir)
+
+    ds_dir = os.path.join(data_dir, name)
+    train_bin = os.path.join(ds_dir, "train.bin")
+    val_bin = os.path.join(ds_dir, "val.bin")
+
+    tokenize_and_save(train_txt, train_bin, tokenizer)
+    tokenize_and_save(val_txt, val_bin, tokenizer)
+
+    return train_bin, val_bin
+
+
+def _concatenate_bin_files(bin_paths: list[str], output_path: str) -> int:
+    """Concatenate multiple .bin token files into one."""
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    total_tokens = 0
+    with open(output_path, "wb") as f_out:
+        for path in bin_paths:
+            data = np.memmap(path, dtype=np.uint16, mode="r")
+            data.tofile(f_out)
+            total_tokens += len(data)
+    size_mb = os.path.getsize(output_path) / 1024**2
+    print(f"  Combined: {output_path} ({total_tokens:,} tokens, {size_mb:.1f} MB)")
+    return total_tokens
+
+
+def prepare_mixed(
+    data_dir: str,
+    tokenizer: Tokenizer,
+    datasets: Optional[list[str]] = None,
+) -> tuple[str, str]:
+    """
+    Prepare all datasets and concatenate their .bin files into a mixed dataset.
+
+    Args:
+        data_dir: Base data directory.
+        tokenizer: Trained tokenizer.
+        datasets: List of dataset names to include (default: all).
+
+    Returns:
+        Tuple of (mixed_train_bin, mixed_val_bin).
+    """
+    if datasets is None:
+        datasets = DATASET_NAMES
+
+    mixed_dir = os.path.join(data_dir, "mixed")
+    mixed_train = os.path.join(mixed_dir, "train.bin")
+    mixed_val = os.path.join(mixed_dir, "val.bin")
+
+    # Return early if mixed files already exist
+    if os.path.exists(mixed_train) and os.path.exists(mixed_val):
+        n_train = os.path.getsize(mixed_train) // 2
+        n_val = os.path.getsize(mixed_val) // 2
+        print(f"[mixed] Already exists: {n_train:,} train, {n_val:,} val tokens")
+        return mixed_train, mixed_val
+
+    # Prepare each dataset individually
+    train_bins = []
+    val_bins = []
+    for name in datasets:
+        print(f"\n--- Preparing {name} ---")
+        t_bin, v_bin = prepare_dataset(name, data_dir, tokenizer)
+        train_bins.append(t_bin)
+        val_bins.append(v_bin)
+
+    # Concatenate all .bin files
+    print(f"\n--- Building mixed dataset ---")
+    _concatenate_bin_files(train_bins, mixed_train)
+    _concatenate_bin_files(val_bins, mixed_val)
+
+    return mixed_train, mixed_val

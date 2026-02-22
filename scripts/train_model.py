@@ -1,9 +1,15 @@
 """
-CLI script to train the LLaMA model on TinyStories.
+CLI script to train the LLaMA model.
 
 USAGE:
-    # Train with default settings (~15M params, TinyStories)
+    # Train on TinyStories (default)
     python scripts/train_model.py
+
+    # Train on a math dataset
+    python scripts/train_model.py --dataset gsm8k
+
+    # Train on all datasets combined
+    python scripts/train_model.py --dataset mixed
 
     # Resume from a checkpoint
     python scripts/train_model.py --resume checkpoints/step_005000.pt
@@ -11,14 +17,22 @@ USAGE:
     # Custom settings
     python scripts/train_model.py --batch-size 32 --max-steps 5000 --lr 1e-4
 
+AVAILABLE DATASETS:
+    tinystories  ~2.1M short stories (default)
+    gsm8k        8.5K grade school math word problems
+    simplemath   100K basic arithmetic problems
+    aqua_rat     98K word problems with reasoning
+    mixed        All of the above combined
+
 PREREQUISITES:
     1. Train the tokenizer first: python scripts/train_tokenizer.py
+       (use --datasets all if training on math data)
     2. Ensure you have the dependencies: pip install -r requirements.txt
 
 WHAT THIS SCRIPT DOES:
     1. Creates ModelConfig and TrainConfig from CLI arguments
-    2. Calls the train() function from llama_vc.train
-    3. The train function handles everything: data, model, optimizer, loop
+    2. Downloads and tokenizes the selected dataset (if needed)
+    3. Calls the train() function from llama_vc.train
 """
 
 import os
@@ -29,12 +43,22 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from llama_vc.config import ModelConfig, TrainConfig
 from llama_vc.train import train
+from llama_vc.tokenizer import Tokenizer
+from llama_vc.dataset import DATASET_NAMES, prepare_dataset, prepare_mixed
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train a LLaMA model on TinyStories",
+        description="Train a LLaMA model on selected dataset",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    # Dataset selection
+    data_group = parser.add_argument_group("Dataset")
+    data_group.add_argument(
+        "--dataset", type=str, default="tinystories",
+        help="Dataset to train on. "
+             f"Choices: {', '.join(DATASET_NAMES)}, mixed"
     )
 
     # Model architecture arguments
@@ -82,6 +106,14 @@ def main():
 
     args = parser.parse_args()
 
+    # Validate dataset choice
+    valid_datasets = DATASET_NAMES + ["mixed"]
+    if args.dataset not in valid_datasets:
+        parser.error(
+            f"Unknown dataset '{args.dataset}'. "
+            f"Available: {', '.join(valid_datasets)}"
+        )
+
     # Build configs from arguments
     model_config = ModelConfig(
         vocab_size=args.vocab_size,
@@ -124,7 +156,8 @@ def main():
     print("=" * 60)
     print("LLaMA Training Configuration")
     print("=" * 60)
-    print(f"\nModel: {args.dim}d, {args.n_layers}L, {args.n_heads}H, {args.n_kv_heads}KV")
+    print(f"\nDataset: {args.dataset}")
+    print(f"Model: {args.dim}d, {args.n_layers}L, {args.n_heads}H, {args.n_kv_heads}KV")
     print(f"FFN hidden: {args.hidden_dim}, Vocab: {args.vocab_size}, Seq: {args.max_seq_len}")
     print(f"\nTraining: {args.max_steps} steps, batch {args.batch_size}×{args.grad_accum}")
     print(f"LR: {args.lr} → {args.min_lr} (warmup: {args.warmup_steps})")
@@ -135,8 +168,20 @@ def main():
         print(f"Resuming from: {args.resume}")
     print("=" * 60 + "\n")
 
-    # Run training
-    train(model_config, train_config, resume_from=args.resume)
+    # Prepare the selected dataset
+    tokenizer = Tokenizer(args.tokenizer_path)
+    if args.dataset == "mixed":
+        train_bin, val_bin = prepare_mixed(args.data_dir, tokenizer)
+    else:
+        train_bin, val_bin = prepare_dataset(args.dataset, args.data_dir, tokenizer)
+
+    # Run training with resolved data paths
+    train(
+        model_config, train_config,
+        resume_from=args.resume,
+        train_bin=train_bin,
+        val_bin=val_bin,
+    )
 
 
 if __name__ == "__main__":

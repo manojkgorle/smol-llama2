@@ -233,6 +233,8 @@ def train(
     model_config: Optional[ModelConfig] = None,
     train_config: Optional[TrainConfig] = None,
     resume_from: Optional[str] = None,
+    train_bin: Optional[str] = None,
+    val_bin: Optional[str] = None,
 ) -> None:
     """
     Main training function.
@@ -249,6 +251,10 @@ def train(
         model_config: Model architecture config. If None, uses defaults.
         train_config: Training hyperparameters. If None, uses defaults.
         resume_from: Path to checkpoint file to resume training from.
+        train_bin: Pre-resolved path to tokenized training data (.bin).
+            If provided, skips data preparation.
+        val_bin: Pre-resolved path to tokenized validation data (.bin).
+            If provided, skips data preparation.
     """
     # ── Use defaults if not provided ───────────────────────────────────────
     if model_config is None:
@@ -284,8 +290,13 @@ def train(
         model_config.vocab_size = tokenizer.vocab_size
 
     # ── Data Preparation ──────────────────────────────────────────────────
-    logger.log_info("Preparing training data...")
-    train_bin, val_bin = prepare_data(train_config.data_dir, tokenizer)
+    if train_bin is not None and val_bin is not None:
+        logger.log_info(f"Using provided data paths:")
+        logger.log_info(f"  Train: {train_bin}")
+        logger.log_info(f"  Val:   {val_bin}")
+    else:
+        logger.log_info("Preparing training data...")
+        train_bin, val_bin = prepare_data(train_config.data_dir, tokenizer)
 
     # Create DataLoaders
     train_loader = create_dataloader(
