@@ -38,11 +38,15 @@ function _createStatCards() {
     if (!container) return;
 
     var cards = [
-        { id: 'stat-loss',     label: 'Loss',          value: '--',  sub: 'Train loss' },
-        { id: 'stat-ppl',      label: 'Perplexity',    value: '--',  sub: 'exp(loss)' },
-        { id: 'stat-lr',       label: 'Learning Rate',  value: '--',  sub: 'Current LR' },
+        { id: 'stat-loss',     label: 'Loss',          value: '--',  sub: 'Train loss',
+          help: 'Cross-entropy loss measures how far the model\'s predictions are from the true next tokens. <strong>Lower is better</strong>. A loss near 0 means the model is very confident in the correct answer.' },
+        { id: 'stat-ppl',      label: 'Perplexity',    value: '--',  sub: 'exp(loss)',
+          help: '<strong>Perplexity = e^loss</strong>. Intuitively, it\'s the number of equally likely tokens the model is choosing between. A perplexity of 10 means the model is as uncertain as choosing between 10 options.' },
+        { id: 'stat-lr',       label: 'Learning Rate',  value: '--',  sub: 'Current LR',
+          help: 'Controls how large each gradient update step is. Typically follows a <strong>warmup + cosine decay</strong> schedule. Too high = unstable training. Too low = slow learning.' },
         { id: 'stat-step',     label: 'Step',           value: '--',  sub: 'Training step' },
-        { id: 'stat-grad',     label: 'Grad Norm',      value: '--',  sub: 'Global gradient norm' },
+        { id: 'stat-grad',     label: 'Grad Norm',      value: '--',  sub: 'Global gradient norm',
+          help: '<strong>Gradient norm</strong> measures the magnitude of the update signal. Spikes may indicate the model encountering unusual data. Gradient clipping caps this value to prevent training instability.' },
         { id: 'stat-val-loss', label: 'Val Loss',       value: '--',  sub: 'Latest validation' },
     ];
 
@@ -50,8 +54,16 @@ function _createStatCards() {
         var card = document.createElement('div');
         card.className = 'stat-card';
         card.id = c.id;
-        card.innerHTML =
-            '<div class="stat-label">' + escapeHtml(c.label) + '</div>' +
+
+        var labelDiv = document.createElement('div');
+        labelDiv.className = 'stat-label';
+        labelDiv.textContent = c.label;
+        if (c.help) {
+            labelDiv.appendChild(createHelpIcon(c.label, c.help));
+        }
+        card.appendChild(labelDiv);
+
+        card.innerHTML +=
             '<div class="stat-value">' + escapeHtml(c.value) + '</div>' +
             '<div class="stat-sub">' + escapeHtml(c.sub) + '</div>';
         container.appendChild(card);

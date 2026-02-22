@@ -30,6 +30,13 @@ from viz.analysis import (
     get_activation_steering,
     get_activation_swapping,
     get_precomputation_detection,
+    get_embedding_space,
+    get_token_waterfall,
+    get_prompt_comparison,
+    get_neuron_overview,
+    get_neuron_detail,
+    get_neuron_network,
+    get_attention_flow,
 )
 from viz.captum_analysis import (
     get_integrated_gradients,
@@ -445,6 +452,219 @@ def circuits_precomputation():
 
     result = get_precomputation_detection(_model, token_ids, _device, top_k=top_k)
     return jsonify(result)
+
+
+# --- Embedding space ---
+
+@app.route("/api/embeddings", methods=["POST"])
+def embeddings():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    method = data.get("method", "pca")
+    if not prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+
+    token_ids = _get_token_ids(prompt)
+    result = get_embedding_space(_model, token_ids, _device, method=method)
+    return jsonify(result)
+
+
+# --- Token waterfall ---
+
+@app.route("/api/waterfall", methods=["POST"])
+def waterfall():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    top_k = data.get("top_k", 5)
+    if not prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+
+    token_ids = _get_token_ids(prompt)
+    if len(token_ids) < 2:
+        return jsonify({"error": "Prompt too short"}), 400
+
+    result = get_token_waterfall(_model, token_ids, _device, top_k=top_k)
+    return jsonify(result)
+
+
+# --- Prompt comparison ---
+
+@app.route("/api/compare", methods=["POST"])
+def compare():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    prompt_a = data.get("prompt_a", "")
+    prompt_b = data.get("prompt_b", "")
+    if not prompt_a or not prompt_b:
+        return jsonify({"error": "Both prompt_a and prompt_b required"}), 400
+
+    ids_a = _get_token_ids(prompt_a)
+    ids_b = _get_token_ids(prompt_b)
+    if len(ids_a) < 2 or len(ids_b) < 2:
+        return jsonify({"error": "Prompts too short"}), 400
+
+    result = get_prompt_comparison(_model, ids_a, ids_b, _device)
+    return jsonify(result)
+
+
+# --- Neuron browser ---
+
+@app.route("/api/neurons/overview", methods=["POST"])
+def neurons_overview():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    layer = data.get("layer", 0)
+    if not prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+    if not (0 <= layer < _config.n_layers):
+        return jsonify({"error": f"layer must be 0-{_config.n_layers - 1}"}), 400
+
+    token_ids = _get_token_ids(prompt)
+    result = get_neuron_overview(_model, token_ids, _device, layer=layer)
+    return jsonify(result)
+
+
+@app.route("/api/neurons/detail", methods=["POST"])
+def neurons_detail():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    layer = data.get("layer", 0)
+    neuron_idx = data.get("neuron_idx", 0)
+    if not prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+    if not (0 <= layer < _config.n_layers):
+        return jsonify({"error": f"layer must be 0-{_config.n_layers - 1}"}), 400
+
+    token_ids = _get_token_ids(prompt)
+    result = get_neuron_detail(_model, token_ids, _device, layer=layer, neuron_idx=neuron_idx)
+    return jsonify(result)
+
+
+@app.route("/api/neurons/network", methods=["POST"])
+def neurons_network():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    layer = data.get("layer", 0)
+    top_k = data.get("top_k", 20)
+    if not prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+    if not (0 <= layer < _config.n_layers):
+        return jsonify({"error": f"layer must be 0-{_config.n_layers - 1}"}), 400
+
+    token_ids = _get_token_ids(prompt)
+    result = get_neuron_network(_model, token_ids, _device, layer=layer, top_k=top_k)
+    return jsonify(result)
+
+
+# --- Attention flow ---
+
+@app.route("/api/attention_flow", methods=["POST"])
+def attention_flow():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    prompt = data.get("prompt", "")
+    if not prompt:
+        return jsonify({"error": "No prompt provided"}), 400
+
+    token_ids = _get_token_ids(prompt)
+    result = get_attention_flow(_model, token_ids, _device)
+    return jsonify(result)
+
+
+# --- Tokenizer utilities ---
+
+@app.route("/api/tokenizer/encode", methods=["POST"])
+def tokenizer_encode():
+    data = request.get_json()
+    text = data.get("text", "")
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+
+    token_ids, token_strings = tokenize_prompt(text)
+    return jsonify({
+        "token_ids": token_ids,
+        "token_strings": token_strings,
+        "num_tokens": len(token_ids),
+    })
+
+
+@app.route("/api/tokenizer/search", methods=["POST"])
+def tokenizer_search():
+    data = request.get_json()
+    query = data.get("query", "")
+    limit = data.get("limit", 50)
+    if not query:
+        return jsonify({"error": "No query provided"}), 400
+
+    from viz.analysis import _get_tokenizer
+    tok = _get_tokenizer()
+    results = []
+    for i in range(tok.vocab_size):
+        piece = tok.id_to_piece(i)
+        if query.lower() in piece.lower():
+            results.append({"id": i, "token": piece})
+            if len(results) >= limit:
+                break
+
+    return jsonify({"query": query, "results": results})
+
+
+@app.route("/api/tokenizer/neighbors", methods=["POST"])
+def tokenizer_neighbors():
+    err = _require_model()
+    if err:
+        return err
+    data = request.get_json()
+    token_id = data.get("token_id", 0)
+    top_k = data.get("top_k", 20)
+
+    from viz.analysis import _get_tokenizer
+    tok = _get_tokenizer()
+
+    import torch
+    embed = _model.tok_embeddings.weight.detach()  # (vocab_size, dim)
+    vocab_size = embed.shape[0]
+    if token_id < 0 or token_id >= vocab_size:
+        return jsonify({"error": "Invalid token_id"}), 400
+
+    target = embed[token_id].unsqueeze(0)  # (1, dim)
+    sims = torch.nn.functional.cosine_similarity(target, embed, dim=1)  # (vocab_size,)
+    top_sims, top_ids = sims.topk(top_k + 1)  # +1 to skip self
+
+    neighbors = []
+    for sim_val, tid in zip(top_sims.tolist(), top_ids.tolist()):
+        if tid == token_id:
+            continue
+        neighbors.append({
+            "id": tid,
+            "token": tok.id_to_piece(tid),
+            "similarity": round(sim_val, 4),
+        })
+
+    return jsonify({
+        "token_id": token_id,
+        "token": tok.id_to_piece(token_id),
+        "neighbors": neighbors[:top_k],
+    })
 
 
 # --- WebSocket events ---

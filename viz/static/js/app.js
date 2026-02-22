@@ -16,6 +16,7 @@ window.vizState = {
         attribution: false,
         circuits: false,
         captum: false,
+        embeddings: false,
     },
 };
 
@@ -76,6 +77,7 @@ function switchTab(tabName) {
             case 'attribution': if (typeof initAttribution === 'function') initAttribution(); break;
             case 'circuits': if (typeof initCircuits === 'function') initCircuits(); break;
             case 'captum': if (typeof initCaptum === 'function') initCaptum(); break;
+            case 'embeddings': if (typeof initEmbeddings === 'function') initEmbeddings(); break;
         }
     }
 
@@ -248,6 +250,50 @@ function darkLayout(overrides) {
     });
     return base;
 }
+
+// ---------------------------------------------------------------------------
+// Help icon system
+// ---------------------------------------------------------------------------
+function createHelpIcon(title, bodyHtml) {
+    var wrapper = document.createElement('span');
+    wrapper.style.position = 'relative';
+    wrapper.style.display = 'inline-flex';
+    wrapper.style.alignItems = 'center';
+
+    var icon = document.createElement('span');
+    icon.className = 'help-icon';
+    icon.textContent = '?';
+
+    var popover = document.createElement('div');
+    popover.className = 'help-popover';
+    popover.innerHTML =
+        '<div class="help-popover-title">' + escapeHtml(title) + '</div>' +
+        '<div class="help-popover-body">' + bodyHtml + '</div>';
+
+    wrapper.appendChild(icon);
+    wrapper.appendChild(popover);
+
+    icon.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var isVisible = popover.classList.contains('visible');
+        // Close all other popovers
+        document.querySelectorAll('.help-popover.visible').forEach(function (p) {
+            p.classList.remove('visible');
+        });
+        if (!isVisible) {
+            popover.classList.add('visible');
+        }
+    });
+
+    return wrapper;
+}
+
+// Close help popovers on outside click
+document.addEventListener('click', function () {
+    document.querySelectorAll('.help-popover.visible').forEach(function (p) {
+        p.classList.remove('visible');
+    });
+});
 
 // ---------------------------------------------------------------------------
 // GQA helper: get group index for a head

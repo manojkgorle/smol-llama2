@@ -1098,6 +1098,236 @@ td.lens-preds-cell {
 }
 
 
+/* ===== Help Icons & Popovers ===== */
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: rgba(34, 211, 238, 0.1);
+    border: 1px solid rgba(34, 211, 238, 0.25);
+    color: var(--highlight);
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    margin-left: 6px;
+    position: relative;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    vertical-align: middle;
+    line-height: 1;
+    user-select: none;
+}
+
+.help-icon:hover {
+    background: rgba(34, 211, 238, 0.18);
+    border-color: rgba(34, 211, 238, 0.45);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.15);
+}
+
+.help-popover {
+    position: absolute;
+    z-index: 300;
+    width: 320px;
+    padding: 16px 18px;
+    background: rgba(17, 17, 19, 0.95);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(34, 211, 238, 0.2);
+    border-radius: var(--radius-md);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(34, 211, 238, 0.06);
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: none;
+    animation: popoverEnter 0.15s ease-out;
+}
+
+.help-popover.visible {
+    display: block;
+}
+
+@keyframes popoverEnter {
+    from { opacity: 0; transform: translateX(-50%) translateY(4px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+.help-popover-title {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--highlight);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
+}
+
+.help-popover-body {
+    font-size: 13px;
+    font-family: var(--font-sans);
+    color: #d4d4d8;
+    line-height: 1.6;
+}
+
+.help-popover-body strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+/* ===== Model View Grid ===== */
+.model-view-grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 6px;
+}
+
+.model-view-cell {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.model-view-cell:hover {
+    border-color: var(--border-hover);
+    transform: translateY(-1px);
+}
+
+.model-view-cell .mv-label {
+    font-size: 8px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-bottom: 2px;
+}
+
+.model-view-row-label {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 8px;
+}
+
+/* ===== Neuron Browser ===== */
+.neuron-detail-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-top: var(--space-md);
+}
+
+.neuron-detail-panel .neuron-title {
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--highlight);
+    margin-bottom: 12px;
+}
+
+/* ===== Token Explorer ===== */
+.token-explorer-input {
+    display: flex;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-md);
+}
+
+.token-explorer-input input {
+    flex: 1;
+    padding: 9px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.03);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    outline: none;
+}
+
+.token-explorer-input input:focus {
+    border-color: rgba(34, 211, 238, 0.35);
+    box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.06);
+}
+
+.neighbors-list {
+    list-style: none;
+    padding: 0;
+}
+
+.neighbors-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-family: var(--font-mono);
+}
+
+.neighbors-list li:last-child { border-bottom: none; }
+
+.neighbors-list .neighbor-token { color: var(--text-primary); font-weight: 600; }
+.neighbors-list .neighbor-score { color: var(--text-muted); font-size: 11px; }
+
+/* ===== View Switcher ===== */
+.view-switcher {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+
+.view-switcher button {
+    padding: 5px 12px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.view-switcher button.active {
+    background: rgba(34, 211, 238, 0.1);
+    color: var(--highlight);
+}
+
+.view-switcher button:hover:not(.active) {
+    color: var(--text-primary);
+}
+
+/* ===== Network Diagram ===== */
+.nn-diagram-container {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 0;
+    -webkit-overflow-scrolling: touch;
+}
+
+.nn-diagram-container svg {
+    display: block;
+    margin: 0 auto;
+}
+
+.nn-link {
+    transition: stroke-opacity 0.15s ease, stroke-width 0.15s ease;
+    pointer-events: none;
+}
+
 /* ===== Scrollbar ===== */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

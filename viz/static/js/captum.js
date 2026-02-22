@@ -86,6 +86,13 @@ function initCaptum() {
     promptGroup.appendChild(promptInput);
     controlsRoot.appendChild(promptGroup);
 
+    // Help icons for Captum methods
+    controlsRoot.appendChild(createHelpIcon('Captum Attribution',
+        '<strong>Gradient Saliency</strong>: Computes the gradient magnitude for each token embedding. Fast but noisy. ' +
+        '<strong>Integrated Gradients</strong>: Accumulates gradients along the path from a baseline to the input. More reliable but slower. ' +
+        '<strong>Layer Conductance</strong>: Measures how much each layer contributes to the output for each token. Slowest but most informative.'
+    ));
+
     // Three method buttons
     var btnSaliency = document.createElement('button');
     btnSaliency.className = 'btn btn-primary';
@@ -165,6 +172,11 @@ function initCaptum() {
                 var chartTitle = document.createElement('div');
                 chartTitle.className = 'chart-title';
                 chartTitle.textContent = 'Gradient Saliency per Token';
+                chartTitle.appendChild(createHelpIcon('Gradient Saliency',
+                    'Shows how much each token\'s embedding affects the output. ' +
+                    'Computed as the <strong>L2 norm of the gradient</strong> of the output with respect to the embedding. ' +
+                    'Higher values = the model is more sensitive to changes in that token.'
+                ));
                 chartCard.appendChild(chartTitle);
 
                 var chartDiv = document.createElement('div');
@@ -263,6 +275,12 @@ function initCaptum() {
                 var chartTitle = document.createElement('div');
                 chartTitle.className = 'chart-title';
                 chartTitle.textContent = 'Integrated Gradients Attribution per Token';
+                chartTitle.appendChild(createHelpIcon('Integrated Gradients',
+                    'Accumulates gradients along a straight-line path from a <strong>zero baseline</strong> to the actual input. ' +
+                    '<strong>Positive</strong> (red) = token pushes toward the predicted output. ' +
+                    '<strong>Negative</strong> (blue) = token pushes away. ' +
+                    'The convergence delta measures approximation accuracy (lower = better).'
+                ));
                 chartCard.appendChild(chartTitle);
 
                 var chartDiv = document.createElement('div');
@@ -353,6 +371,11 @@ function initCaptum() {
                 var chartTitle = document.createElement('div');
                 chartTitle.className = 'chart-title';
                 chartTitle.textContent = 'Layer Conductance (per token, per layer)';
+                chartTitle.appendChild(createHelpIcon('Layer Conductance',
+                    'Measures how much each <strong>layer contributes</strong> to the output for each token. ' +
+                    'Computed by decomposing gradients through each layer\'s hidden representation. ' +
+                    'Hot spots reveal which layer-token combinations are most important for the prediction.'
+                ));
                 chartCard.appendChild(chartTitle);
 
                 var chartDiv = document.createElement('div');

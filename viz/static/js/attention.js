@@ -66,8 +66,10 @@ function _buildControls() {
     // View dropdown
     var viewOptions = [
         { value: 'all-heads', label: 'All Heads' },
+        { value: 'model-view', label: 'Model View' },
         { value: 'entropy',   label: 'Entropy' },
         { value: 'ablation',  label: 'Ablation' },
+        { value: 'flow',      label: 'Flow / Rollout' },
     ];
     var viewSel = createDropdown('attention-controls', 'View:', 'attn-view-select', viewOptions);
     if (viewSel) {
@@ -95,8 +97,10 @@ function _buildViewArea() {
         'This model uses <strong>Grouped-Query Attention</strong> (GQA) — 6 query heads share 2 KV heads.</p>' +
         '<div class="guide-features">' +
             '<div class="guide-item"><span class="guide-tag">all heads</span>Mini heatmaps for every head at a chosen layer. Click to expand.</div>' +
+            '<div class="guide-item"><span class="guide-tag">model view</span>All heads at all layers in a single grid. Read bottom-to-top.</div>' +
             '<div class="guide-item"><span class="guide-tag">entropy</span>Which heads focus sharply vs. spread attention uniformly.</div>' +
             '<div class="guide-item"><span class="guide-tag">ablation</span>Zero out each head and measure how loss changes. Shows which heads matter most.</div>' +
+            '<div class="guide-item"><span class="guide-tag">flow</span>Attention rollout showing effective attention after all layers and residual connections.</div>' +
         '</div>' +
         '<p class="guide-hint">Enter a prompt above and click <strong>Inspect</strong> to begin.</p>';
     viewArea.appendChild(guide);
@@ -195,11 +199,17 @@ function _renderCurrentView() {
         case 'all-heads':
             _renderAllHeadsView(mainArea, detailArea);
             break;
+        case 'model-view':
+            _renderModelView(mainArea);
+            break;
         case 'entropy':
             _renderEntropyView(mainArea);
             break;
         case 'ablation':
             _renderAblationView(mainArea);
+            break;
+        case 'flow':
+            _renderFlowView(mainArea);
             break;
         default:
             _renderAllHeadsView(mainArea, detailArea);
@@ -270,7 +280,7 @@ function _renderAllHeadsView(mainArea, detailArea) {
 
     // GQA legend
     var legend = document.createElement('div');
-    legend.style.cssText = 'margin-top:12px; display:flex; gap:20px; font-size:12px; color:var(--text-muted);';
+    legend.style.cssText = 'margin-top:12px; display:flex; gap:20px; font-size:12px; color:var(--text-muted); align-items:center;';
     legend.innerHTML =
         '<span style="display:flex;align-items:center;gap:6px;">' +
         '<span style="width:14px;height:14px;border-radius:3px;background:var(--gqa-group0);display:inline-block;"></span>' +
@@ -278,6 +288,11 @@ function _renderAllHeadsView(mainArea, detailArea) {
         '<span style="display:flex;align-items:center;gap:6px;">' +
         '<span style="width:14px;height:14px;border-radius:3px;background:var(--gqa-group1);display:inline-block;"></span>' +
         'KV Head 1 (Heads 3-5)</span>';
+    legend.appendChild(createHelpIcon('GQA Grouping',
+        '<strong>Grouped-Query Attention</strong> shares Key-Value heads across multiple Query heads to reduce memory. ' +
+        'Heads 0-2 share KV Head 0, Heads 3-5 share KV Head 1. ' +
+        'Heads within a group see the same keys/values but can learn different query patterns.'
+    ));
     mainArea.appendChild(legend);
 }
 
@@ -332,7 +347,16 @@ function _renderEntropyView(container) {
 
     var card = document.createElement('div');
     card.className = 'chart-card full-width';
-    card.innerHTML = '<div class="chart-title">Mean Attention Entropy per Head</div>';
+    var entropyTitle = document.createElement('div');
+    entropyTitle.className = 'chart-title';
+    entropyTitle.textContent = 'Mean Attention Entropy per Head';
+    entropyTitle.appendChild(createHelpIcon('Attention Entropy',
+        'Entropy measures how <strong>spread out</strong> vs <strong>focused</strong> attention is. ' +
+        '<strong>Low entropy</strong> = head focuses on 1-2 tokens. ' +
+        '<strong>High entropy</strong> = attention spread broadly across many tokens. ' +
+        'Focused heads often perform specific functions like "attend to previous token" or "attend to first token".'
+    ));
+    card.appendChild(entropyTitle);
     var chartDiv = document.createElement('div');
     chartDiv.id = 'attn-entropy-chart';
     chartDiv.style.minHeight = '400px';
@@ -397,7 +421,16 @@ function _renderAblationView(container) {
 
     var card = document.createElement('div');
     card.className = 'chart-card full-width';
-    card.innerHTML = '<div class="chart-title">Head Ablation: Delta-Loss (blue = helps, red = hurts)</div>';
+    var ablTitle = document.createElement('div');
+    ablTitle.className = 'chart-title';
+    ablTitle.textContent = 'Head Ablation: Delta-Loss (blue = helps, red = hurts)';
+    ablTitle.appendChild(createHelpIcon('Head Ablation',
+        'Each head is <strong>zeroed out</strong> one at a time and the loss change is measured. ' +
+        '<strong>Positive delta</strong> (red) = removing the head hurts performance (important head). ' +
+        '<strong>Negative delta</strong> (blue) = removing the head helps performance (possibly harmful head). ' +
+        'This reveals which heads matter most for the model\'s prediction.'
+    ));
+    card.appendChild(ablTitle);
     var chartDiv = document.createElement('div');
     chartDiv.id = 'attn-ablation-chart';
     chartDiv.style.minHeight = '400px';
@@ -577,4 +610,176 @@ function _maxTokenLabelWidth(tokens) {
         if (tokens[i].length > maxLen) maxLen = tokens[i].length;
     }
     return Math.min(maxLen * 7 + 10, 80);
+}
+
+// ---------------------------------------------------------------------------
+// VIEW: Model View — all layers x all heads in a grid
+// ---------------------------------------------------------------------------
+function _renderModelView(container) {
+    var data = _attnState.data;
+    if (!data || !data.layers) {
+        container.innerHTML = '<div class="placeholder-message">No attention data. Submit a prompt first.</div>';
+        return;
+    }
+
+    var card = document.createElement('div');
+    card.className = 'chart-card full-width';
+
+    var title = document.createElement('div');
+    title.className = 'chart-title';
+    title.textContent = 'Model-Wide Attention View (all layers x all heads)';
+    title.appendChild(createHelpIcon('Model View',
+        'Shows attention patterns for <strong>every head at every layer</strong> simultaneously. ' +
+        'Read bottom-to-top to see how patterns evolve through the network. ' +
+        'Colors indicate GQA group membership. Click any mini heatmap to expand it.'
+    ));
+    card.appendChild(title);
+
+    var tokens = data.tokens;
+    var nLayers = window.N_LAYERS;
+    var nHeads = data.n_heads;
+
+    // Grid: rows = layers (bottom to top), cols = heads
+    var grid = document.createElement('div');
+    grid.style.cssText = 'display:grid; grid-template-columns: 60px repeat(' + nHeads + ', 1fr); gap:4px; align-items:center;';
+
+    // Header row
+    var emptyCorner = document.createElement('div');
+    grid.appendChild(emptyCorner);
+    for (var h = 0; h < nHeads; h++) {
+        var hLabel = document.createElement('div');
+        hLabel.style.cssText = 'text-align:center; font-size:10px; color:' + getGQAColor(h) + '; font-family:var(--font-mono); font-weight:600;';
+        hLabel.textContent = 'H' + h;
+        grid.appendChild(hLabel);
+    }
+
+    // Layer rows (bottom = layer 0 at bottom, layer 7 at top)
+    for (var l = nLayers - 1; l >= 0; l--) {
+        var layerKey = String(l);
+        if (!data.layers[layerKey]) continue;
+
+        // Row label
+        var rowLabel = document.createElement('div');
+        rowLabel.className = 'model-view-row-label';
+        rowLabel.textContent = 'Layer ' + l;
+        rowLabel.style.color = window.LAYER_COLORS[l];
+        grid.appendChild(rowLabel);
+
+        for (var hi = 0; hi < nHeads; hi++) {
+            (function (layerIdx, headIdx) {
+                var headKey = String(headIdx);
+                var weights = data.layers[layerKey][headKey];
+                if (!weights) {
+                    grid.appendChild(document.createElement('div'));
+                    return;
+                }
+
+                var group = getGQAGroup(headIdx);
+                var cell = document.createElement('div');
+                cell.className = 'model-view-cell gqa-group-' + group;
+
+                var svgContainer = document.createElement('div');
+                svgContainer.id = 'mv-' + layerIdx + '-' + headIdx;
+                cell.appendChild(svgContainer);
+                grid.appendChild(cell);
+
+                var cellSize = Math.max(4, Math.min(10, Math.floor(80 / tokens.length)));
+                _drawD3Heatmap(svgContainer, weights, tokens, {
+                    cellSize: cellSize,
+                    showLabels: false,
+                    mini: true,
+                });
+
+                cell.addEventListener('click', function () {
+                    _attnState.selectedLayer = layerIdx;
+                    _attnState.selectedHead = headIdx;
+                    var detailArea = document.getElementById('attn-detail-area');
+                    _renderSingleHeadView(detailArea, layerIdx, headIdx);
+                });
+            })(l, hi);
+        }
+    }
+
+    card.appendChild(grid);
+    container.appendChild(card);
+}
+
+// ---------------------------------------------------------------------------
+// VIEW: Attention Flow / Rollout
+// ---------------------------------------------------------------------------
+function _renderFlowView(container) {
+    var data = _attnState.data;
+    if (!data) {
+        container.innerHTML = '<div class="placeholder-message">No attention data. Submit a prompt first.</div>';
+        return;
+    }
+
+    var card = document.createElement('div');
+    card.className = 'chart-card full-width';
+
+    var title = document.createElement('div');
+    title.className = 'chart-title';
+    title.textContent = 'Attention Flow / Rollout';
+    title.appendChild(createHelpIcon('Attention Flow',
+        'Attention flow shows <strong>effective attention</strong> after accounting for all layers and residual connections. ' +
+        'Information can flow indirectly through intermediate tokens. ' +
+        'The rollout matrix is computed by multiplying attention matrices across layers with residual connection weighting.'
+    ));
+    card.appendChild(title);
+
+    var chartDiv = document.createElement('div');
+    chartDiv.id = 'attn-flow-chart';
+    chartDiv.style.minHeight = '400px';
+    card.appendChild(chartDiv);
+
+    var statusDiv = document.createElement('div');
+    statusDiv.id = 'attn-flow-status';
+    card.appendChild(statusDiv);
+    container.appendChild(card);
+
+    showInlineLoading('attn-flow-chart');
+
+    // Get the prompt from the input
+    var promptInput = document.getElementById('attention-controls-prompt-input');
+    var prompt = promptInput ? promptInput.value.trim() : '';
+    if (!prompt) {
+        showError('attn-flow-chart', 'No prompt available. Enter a prompt and click Inspect first.');
+        return;
+    }
+
+    apiFetch('/api/attention_flow', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt }),
+    })
+        .then(function (flowData) {
+            var tokens = flowData.tokens;
+            var rollout = flowData.rollout;
+
+            Plotly.newPlot('attn-flow-chart', [{
+                z: rollout,
+                x: tokens,
+                y: tokens,
+                type: 'heatmap',
+                colorscale: 'Viridis',
+                colorbar: {
+                    title: 'Flow Weight',
+                    tickfont: { color: '#e0e0e0' },
+                    titlefont: { color: '#e0e0e0' },
+                },
+                hovertemplate: 'from: %{x}<br>to: %{y}<br>weight: %{z:.4f}<extra></extra>',
+            }], darkLayout({
+                title: { text: 'Attention Rollout Matrix', font: { size: 14 } },
+                xaxis: { title: 'Source Token (key)', tickangle: -45, gridcolor: 'rgba(255,255,255,0.06)' },
+                yaxis: { title: 'Target Token (query)', autorange: 'reversed', gridcolor: 'rgba(255,255,255,0.06)' },
+                height: Math.max(400, tokens.length * 30 + 120),
+                margin: { t: 44, b: 100, l: 100 },
+            }), window.PLOTLY_CONFIG);
+
+            statusDiv.className = 'summary-text';
+            statusDiv.textContent = 'Rollout computed across ' + window.N_LAYERS + ' layers with 0.5 residual weighting. Click cells to see source contributions for each target token.';
+        })
+        .catch(function (err) {
+            showError('attn-flow-chart', 'Flow analysis failed: ' + err.message);
+        });
 }

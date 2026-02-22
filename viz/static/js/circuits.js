@@ -154,6 +154,20 @@ function initCircuits() {
         true
     );
 
+    // Help icon for patching
+    var patchHelpRow = document.createElement('div');
+    patchHelpRow.style.cssText = 'margin-bottom:12px; display:flex; align-items:center;';
+    var patchHelpLabel = document.createElement('span');
+    patchHelpLabel.style.cssText = 'font-size:12px; color:var(--text-muted);';
+    patchHelpLabel.textContent = 'About activation patching';
+    patchHelpRow.appendChild(patchHelpLabel);
+    patchHelpRow.appendChild(createHelpIcon('Activation Patching',
+        '<strong>Activation patching</strong> identifies which components are causally responsible for the model\'s behavior. ' +
+        'We run the model on a corrupted prompt, then <strong>patch in</strong> clean activations one component at a time. ' +
+        'If patching a component <strong>recovers</strong> the clean output, that component is critical for the task.'
+    ));
+    patchBody.insertBefore(patchHelpRow, patchBody.firstChild);
+
     // Dual prompt inputs
     var dualGroup = document.createElement('div');
     dualGroup.className = 'dual-prompt-group';
@@ -294,6 +308,20 @@ function initCircuits() {
         'intervention',
         'Scale a specific attention head or FFN component\'s activation to observe how it steers model predictions. Compare the baseline output against the steered output.'
     );
+
+    var steerHelpRow = document.createElement('div');
+    steerHelpRow.style.cssText = 'margin-bottom:12px; display:flex; align-items:center;';
+    var steerHelpLabel = document.createElement('span');
+    steerHelpLabel.style.cssText = 'font-size:12px; color:var(--text-muted);';
+    steerHelpLabel.textContent = 'About steering';
+    steerHelpRow.appendChild(steerHelpLabel);
+    steerHelpRow.appendChild(createHelpIcon('Activation Steering',
+        '<strong>Activation steering</strong> scales a component\'s output during inference. ' +
+        'Scale <strong>0</strong> = ablate (remove), <strong>1</strong> = normal, <strong>2</strong> = amplify. ' +
+        'KL divergence measures how much the output distribution changed. ' +
+        'Large KL = the component has a strong effect on predictions.'
+    ));
+    steerBody.insertBefore(steerHelpRow, steerBody.firstChild);
 
     // Prompt input
     var steerPromptGroup = document.createElement('div');
@@ -473,6 +501,19 @@ function initCircuits() {
         'Swap activations from a source prompt into a target prompt at a chosen layer and component. Observe how the target prompt\'s predictions change when receiving the source\'s internal representations.'
     );
 
+    var swapHelpRow = document.createElement('div');
+    swapHelpRow.style.cssText = 'margin-bottom:12px; display:flex; align-items:center;';
+    var swapHelpLabel = document.createElement('span');
+    swapHelpLabel.style.cssText = 'font-size:12px; color:var(--text-muted);';
+    swapHelpLabel.textContent = 'About swapping';
+    swapHelpRow.appendChild(swapHelpLabel);
+    swapHelpRow.appendChild(createHelpIcon('Activation Swapping',
+        '<strong>Swapping</strong> replaces the target prompt\'s internal activations with those from a source prompt at a specific layer. ' +
+        'If the output starts to resemble the source prompt\'s output, that layer carries <strong>critical information</strong> ' +
+        'distinguishing the two prompts.'
+    ));
+    swapBody.insertBefore(swapHelpRow, swapBody.firstChild);
+
     // Dual prompt inputs
     var swapDualGroup = document.createElement('div');
     swapDualGroup.className = 'dual-prompt-group';
@@ -633,6 +674,19 @@ function initCircuits() {
         'Detect whether the model pre-computes future tokens in earlier layers. The heatmap shows, for each position, the earliest layer where future tokens (+2 to +5 ahead) can be linearly decoded from the residual stream.'
     );
 
+    var precompHelpRow = document.createElement('div');
+    precompHelpRow.style.cssText = 'margin-bottom:12px; display:flex; align-items:center;';
+    var precompHelpLabel = document.createElement('span');
+    precompHelpLabel.style.cssText = 'font-size:12px; color:var(--text-muted);';
+    precompHelpLabel.textContent = 'About pre-computation';
+    precompHelpRow.appendChild(precompHelpLabel);
+    precompHelpRow.appendChild(createHelpIcon('Pre-computation',
+        'Models sometimes <strong>pre-compute future tokens</strong> in their residual stream before the position where they\'re needed. ' +
+        'This is detected by checking if future tokens appear in top-k logit lens predictions at each position/layer. ' +
+        'Earlier detection = stronger pre-computation signal.'
+    ));
+    precompBody.insertBefore(precompHelpRow, precompBody.firstChild);
+
     // Prompt input
     var precompPromptGroup = document.createElement('div');
     precompPromptGroup.className = 'prompt-group';
@@ -768,6 +822,180 @@ function initCircuits() {
             .catch(function (err) {
                 hideLoading(precompResultsId);
                 showError(precompResultsId, err.message);
+            });
+    });
+
+    // -----------------------------------------------------------------------
+    // Subsection 5: Prompt Comparison
+    // -----------------------------------------------------------------------
+    var compareBody = createSubsection(
+        root,
+        'Prompt Comparison',
+        'divergence',
+        'Compare how two prompts are processed differently. See where their internal representations diverge and how predictions differ.'
+    );
+
+    var compareHelpRow = document.createElement('div');
+    compareHelpRow.style.cssText = 'margin-bottom:12px; display:flex; align-items:center;';
+    var compareHelpLabel = document.createElement('span');
+    compareHelpLabel.style.cssText = 'font-size:12px; color:var(--text-muted);';
+    compareHelpLabel.textContent = 'About comparison';
+    compareHelpRow.appendChild(compareHelpLabel);
+    compareHelpRow.appendChild(createHelpIcon('Prompt Comparison',
+        'Shows where two prompts\' processing <strong>diverges</strong>. ' +
+        'A sharp drop in <strong>residual similarity</strong> means that layer is where the critical distinction happens. ' +
+        'Entropy comparison shows which heads attend differently between prompts.'
+    ));
+    compareBody.insertBefore(compareHelpRow, compareBody.firstChild);
+
+    // Dual prompt inputs
+    var compareDualGroup = document.createElement('div');
+    compareDualGroup.className = 'dual-prompt-group';
+
+    var compareColA = document.createElement('div');
+    compareColA.className = 'prompt-col';
+    var compareLabelA = document.createElement('label');
+    compareLabelA.textContent = 'Prompt A';
+    var compareInputA = document.createElement('input');
+    compareInputA.type = 'text';
+    compareInputA.placeholder = 'The cat sat on the';
+    compareInputA.id = 'circuits-compare-a';
+    compareColA.appendChild(compareLabelA);
+    compareColA.appendChild(compareInputA);
+
+    var compareColB = document.createElement('div');
+    compareColB.className = 'prompt-col';
+    var compareLabelB = document.createElement('label');
+    compareLabelB.textContent = 'Prompt B';
+    var compareInputB = document.createElement('input');
+    compareInputB.type = 'text';
+    compareInputB.placeholder = 'The dog ran through the';
+    compareInputB.id = 'circuits-compare-b';
+    compareColB.appendChild(compareLabelB);
+    compareColB.appendChild(compareInputB);
+
+    compareDualGroup.appendChild(compareColA);
+    compareDualGroup.appendChild(compareColB);
+    compareBody.appendChild(compareDualGroup);
+
+    var compareBtn = document.createElement('button');
+    compareBtn.className = 'btn btn-primary';
+    compareBtn.textContent = 'Compare';
+    compareBtn.style.marginBottom = '16px';
+    compareBody.appendChild(compareBtn);
+
+    var compareResultsId = 'circuits-compare-results';
+    var compareResults = document.createElement('div');
+    compareResults.className = 'circuits-results';
+    compareResults.id = compareResultsId;
+    compareBody.appendChild(compareResults);
+
+    compareBtn.addEventListener('click', function () {
+        var promptA = compareInputA.value.trim();
+        var promptB = compareInputB.value.trim();
+        if (!promptA || !promptB) return;
+
+        compareResults.innerHTML = '';
+        showLoading(compareResultsId);
+
+        apiFetch('/api/compare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt_a: promptA, prompt_b: promptB }),
+        })
+            .then(function (data) {
+                hideLoading(compareResultsId);
+
+                // Side-by-side predictions
+                var predsId = 'circuits-compare-preds';
+                var predsDiv = document.createElement('div');
+                predsDiv.id = predsId;
+                compareResults.appendChild(predsDiv);
+
+                renderPredictionComparison(
+                    predsId,
+                    data.predictions_a,
+                    data.predictions_b,
+                    'Prompt A',
+                    'Prompt B'
+                );
+
+                // Residual similarity chart
+                var simChartDiv = document.createElement('div');
+                simChartDiv.id = 'circuits-compare-sim-chart';
+                simChartDiv.style.minHeight = '300px';
+                simChartDiv.style.marginTop = '16px';
+                compareResults.appendChild(simChartDiv);
+
+                var simLabels = [];
+                for (var i = 0; i < data.residual_similarity.length; i++) {
+                    simLabels.push('Layer ' + i);
+                }
+
+                Plotly.newPlot('circuits-compare-sim-chart', [{
+                    x: simLabels,
+                    y: data.residual_similarity,
+                    type: 'scatter',
+                    mode: 'lines+markers',
+                    line: { color: '#22d3ee', width: 2 },
+                    marker: { size: 8, color: '#22d3ee' },
+                    hovertemplate: '%{x}<br>Cosine Similarity: %{y:.4f}<extra></extra>',
+                }], darkLayout({
+                    title: { text: 'Residual Stream Similarity (last position)', font: { size: 14 } },
+                    xaxis: { title: 'Layer', gridcolor: 'rgba(255,255,255,0.06)' },
+                    yaxis: { title: 'Cosine Similarity', gridcolor: 'rgba(255,255,255,0.06)', range: [-1, 1] },
+                    margin: { t: 44, b: 48 },
+                }), window.PLOTLY_CONFIG);
+
+                // Entropy comparison bar chart
+                var entropyChartDiv = document.createElement('div');
+                entropyChartDiv.id = 'circuits-compare-entropy-chart';
+                entropyChartDiv.style.minHeight = '300px';
+                entropyChartDiv.style.marginTop = '16px';
+                compareResults.appendChild(entropyChartDiv);
+
+                // Build entropy comparison traces
+                var entropyA = [];
+                var entropyB = [];
+                var entropyLabels = [];
+                for (var layer = 0; layer < window.N_LAYERS; layer++) {
+                    var eA = data.entropy_a[String(layer)];
+                    var eB = data.entropy_b[String(layer)];
+                    if (eA && eB) {
+                        for (var h = 0; h < eA.length; h++) {
+                            entropyLabels.push('L' + layer + 'H' + h);
+                            entropyA.push(eA[h]);
+                            entropyB.push(eB[h]);
+                        }
+                    }
+                }
+
+                Plotly.newPlot('circuits-compare-entropy-chart', [
+                    {
+                        x: entropyLabels,
+                        y: entropyA,
+                        type: 'bar',
+                        name: 'Prompt A',
+                        marker: { color: '#f87171' },
+                    },
+                    {
+                        x: entropyLabels,
+                        y: entropyB,
+                        type: 'bar',
+                        name: 'Prompt B',
+                        marker: { color: '#22d3ee' },
+                    },
+                ], darkLayout({
+                    title: { text: 'Attention Entropy Comparison (per head)', font: { size: 14 } },
+                    barmode: 'group',
+                    xaxis: { title: 'Layer / Head', tickangle: -45, gridcolor: 'rgba(255,255,255,0.06)' },
+                    yaxis: { title: 'Mean Entropy', gridcolor: 'rgba(255,255,255,0.06)' },
+                    margin: { t: 44, b: 80 },
+                }), window.PLOTLY_CONFIG);
+            })
+            .catch(function (err) {
+                hideLoading(compareResultsId);
+                showError(compareResultsId, err.message);
             });
     });
 }

@@ -12,6 +12,11 @@ from llama_vc.model import LLaMA, apply_rotary_embeddings
 from llama_vc.tokenizer import Tokenizer
 from viz.hooks import HookManager
 
+try:
+    from sklearn.decomposition import PCA
+except ImportError:
+    PCA = None
+
 _tokenizer: Tokenizer | None = None
 _tokenizer_path: str = "data/tokenizer.model"
 
@@ -798,4 +803,541 @@ def get_precomputation_detection(
         "precomputation_matrix": precomputation_matrix,
         "future_offsets": future_offsets,
         "findings": findings[:20],
+    }
+
+
+# =========================================================================
+# Embedding Space Visualization
+# =========================================================================
+
+
+def get_embedding_space(
+    model: LLaMA, token_ids: list[int], device: str = "cpu", method: str = "pca"
+) -> dict:
+    """Project vocab embeddings and prompt token trajectories into 2D via PCA."""
+    if PCA is None:
+        return {"error": "scikit-learn not installed. Run: pip install scikit-learn"}
+
+    tok = _get_tokenizer()
+    token_strings = [tok.id_to_piece(tid) for tid in token_ids]
+    input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+
+    # Get vocab embedding matrix
+    embed_weight = model.tok_embeddings.weight.detach().cpu().numpy()  # (vocab_size, dim)
+    vocab_size = embed_weight.shape[0]
+
+    # Fit PCA on vocab embeddings
+    pca = PCA(n_components=2)
+    vocab_2d = pca.fit_transform(embed_weight)  # (vocab_size, 2)
+
+    # Vocab labels for first N tokens (limit for JSON size)
+    max_vocab_points = min(vocab_size, 4096)
+    vocab_labels = [tok.id_to_piece(i) for i in range(max_vocab_points)]
+
+    # Run forward pass with hooks to get residual states at each layer
+    mgr = HookManager(model, mode="inference")
+    mgr.attach()
+    try:
+        with torch.no_grad():
+            model(input_ids)
+        data = mgr.collect()
+    finally:
+        mgr.detach()
+
+    # Build trajectory: project prompt tokens at each depth
+    trajectory = []  # list of {depth, points: [[x, y], ...]}
+
+    # Embedding layer
+    emb_out = data.embedding_output[0].numpy()  # (T, dim)
+    emb_2d = pca.transform(emb_out)
+    trajectory.append({
+        "depth": "embedding",
+        "points": emb_2d.tolist(),
+    })
+
+    for i in range(model.config.n_layers):
+        residual = data.residual_states[i][0].numpy()  # (T, dim)
+        res_2d = pca.transform(residual)
+        trajectory.append({
+            "depth": str(i),
+            "points": res_2d.tolist(),
+        })
+
+    return {
+        "tokens": token_strings,
+        "vocab_points": vocab_2d[:max_vocab_points].tolist(),
+        "vocab_labels": vocab_labels,
+        "trajectory": trajectory,
+        "explained_variance": pca.explained_variance_ratio_.tolist(),
+    }
+
+
+# =========================================================================
+# Token Probability Waterfall
+# =========================================================================
+
+
+def get_token_waterfall(
+    model: LLaMA, token_ids: list[int], device: str = "cpu", top_k: int = 5
+) -> dict:
+    """Compute P(correct_next_token) at each layer depth for every position."""
+    tok = _get_tokenizer()
+    token_strings = [tok.id_to_piece(tid) for tid in token_ids]
+    input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+
+    mgr = HookManager(model, mode="inference")
+    mgr.attach()
+    try:
+        with torch.no_grad():
+            model(input_ids)
+        data = mgr.collect()
+    finally:
+        mgr.detach()
+
+    # Build cumulative residual stream
+    cumulative = [data.embedding_output]
+    for i in range(model.config.n_layers):
+        cumulative.append(data.residual_states[i])
+
+    norm = model.norm
+    output = model.output
+    T = len(token_ids)
+    depth_labels = ["embedding"] + [str(i) for i in range(model.config.n_layers)]
+
+    probability_matrix = []  # [positions x depths]
+    predictions_by_depth = []  # [positions x depths x top_k]
+
+    for pos in range(T - 1):
+        target_id = token_ids[pos + 1]
+        pos_probs = []
+        pos_preds = []
+
+        for depth_idx in range(len(cumulative)):
+            hidden = cumulative[depth_idx][:, pos, :].to(device)
+            with torch.no_grad():
+                depth_logits = output(norm(hidden))
+            probs = torch.softmax(depth_logits[0], dim=-1)
+            target_prob = probs[target_id].item()
+            pos_probs.append(round(target_prob, 6))
+
+            top_probs, top_ids = probs.topk(top_k)
+            pos_preds.append([
+                {"token": tok.id_to_piece(int(tid)), "prob": float(p)}
+                for tid, p in zip(top_ids.tolist(), top_probs.tolist())
+            ])
+
+        probability_matrix.append(pos_probs)
+        predictions_by_depth.append(pos_preds)
+
+    return {
+        "tokens": token_strings,
+        "depth_labels": depth_labels,
+        "probability_matrix": probability_matrix,
+        "predictions_by_depth": predictions_by_depth,
+    }
+
+
+# =========================================================================
+# Prompt Comparison
+# =========================================================================
+
+
+def get_prompt_comparison(
+    model: LLaMA, ids_a: list[int], ids_b: list[int], device: str = "cpu",
+    top_k: int = 10,
+) -> dict:
+    """Compare two prompts: predictions, residual similarity, entropy."""
+    tok = _get_tokenizer()
+    tokens_a = [tok.id_to_piece(tid) for tid in ids_a]
+    tokens_b = [tok.id_to_piece(tid) for tid in ids_b]
+    n_layers = model.config.n_layers
+    n_heads = model.config.n_heads
+
+    results = {}
+    for label, tids, tstrings in [("a", ids_a, tokens_a), ("b", ids_b, tokens_b)]:
+        input_ids = torch.tensor([tids], dtype=torch.long, device=device)
+        mgr = HookManager(model, mode="inference")
+        mgr.attach()
+        try:
+            with torch.no_grad():
+                logits, _ = model(input_ids)
+            data = mgr.collect()
+        finally:
+            mgr.detach()
+
+        # Top-k predictions
+        last_probs = torch.softmax(logits[0, -1], dim=-1)
+        top_probs, top_ids = last_probs.topk(top_k)
+        predictions = [
+            {"token": tok.id_to_piece(int(tid)), "prob": float(p)}
+            for tid, p in zip(top_ids.tolist(), top_probs.tolist())
+        ]
+
+        # Per-layer residual vectors (last position)
+        residuals = []
+        for i in range(n_layers):
+            vec = data.residual_states[i][0, -1, :].to(device)
+            residuals.append(vec)
+
+        # Per-head entropy
+        entropy_per_head = {}
+        for layer_idx in data.attention_weights:
+            attn = data.attention_weights[layer_idx]  # (1, n_heads, T, T)
+            layer_entropy = []
+            for h in range(n_heads):
+                w = attn[0, h]
+                log_w = torch.log(w.clamp(min=1e-10))
+                ent = -(w * log_w).sum(dim=-1).mean().item()
+                layer_entropy.append(round(ent, 4))
+            entropy_per_head[str(layer_idx)] = layer_entropy
+
+        results[label] = {
+            "tokens": tstrings,
+            "predictions": predictions,
+            "residuals": residuals,
+            "entropy_per_head": entropy_per_head,
+        }
+
+    # Cosine similarity between residual vectors at each layer
+    residual_similarity = []
+    for i in range(n_layers):
+        vec_a = results["a"]["residuals"][i]
+        vec_b = results["b"]["residuals"][i]
+        sim = float(torch.nn.functional.cosine_similarity(
+            vec_a.unsqueeze(0), vec_b.unsqueeze(0)
+        ).item())
+        residual_similarity.append(round(sim, 4))
+
+    return {
+        "tokens_a": results["a"]["tokens"],
+        "tokens_b": results["b"]["tokens"],
+        "predictions_a": results["a"]["predictions"],
+        "predictions_b": results["b"]["predictions"],
+        "residual_similarity": residual_similarity,
+        "entropy_a": results["a"]["entropy_per_head"],
+        "entropy_b": results["b"]["entropy_per_head"],
+    }
+
+
+# =========================================================================
+# Neuron Browser
+# =========================================================================
+
+
+def get_neuron_overview(
+    model: LLaMA, token_ids: list[int], device: str = "cpu", layer: int = 0,
+    top_k: int = 50,
+) -> dict:
+    """Return top-k most active neurons in the FFN gate for a given layer."""
+    tok = _get_tokenizer()
+    token_strings = [tok.id_to_piece(tid) for tid in token_ids]
+    input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+
+    mgr = HookManager(model, mode="inference")
+    mgr.attach()
+    try:
+        with torch.no_grad():
+            model(input_ids)
+        data = mgr.collect()
+    finally:
+        mgr.detach()
+
+    if layer not in data.swiglu_internals or "gate" not in data.swiglu_internals[layer]:
+        return {"tokens": token_strings, "layer": layer, "neurons": []}
+
+    gate = data.swiglu_internals[layer]["gate"][0]  # (T, hidden_dim)
+    mean_act = gate.mean(dim=0)  # (hidden_dim,)
+    max_act = gate.abs().max(dim=0).values  # (hidden_dim,)
+
+    # Sort by mean absolute activation
+    sorted_indices = mean_act.abs().argsort(descending=True)[:top_k]
+    neurons = []
+    for idx in sorted_indices.tolist():
+        neurons.append({
+            "idx": idx,
+            "mean_activation": round(float(mean_act[idx]), 4),
+            "max_activation": round(float(max_act[idx]), 4),
+        })
+
+    return {
+        "tokens": token_strings,
+        "layer": layer,
+        "hidden_dim": gate.shape[1],
+        "neurons": neurons,
+    }
+
+
+def get_neuron_network(
+    model: LLaMA, token_ids: list[int], device: str = "cpu",
+    layer: int = 0, top_k: int = 20,
+) -> dict:
+    """Return a network diagram of the FFN structure for a given layer.
+
+    Shows the top-K gate neurons and their connections through the SwiGLU FFN:
+    input dims -> gate (SiLU) / up projection -> gated output -> FFN output.
+    Connections are pruned to top 3 per target neuron to avoid visual clutter.
+    """
+    tok = _get_tokenizer()
+    token_strings = [tok.id_to_piece(tid) for tid in token_ids]
+    input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+
+    mgr = HookManager(model, mode="inference")
+    mgr.attach()
+    try:
+        with torch.no_grad():
+            model(input_ids)
+        data = mgr.collect()
+    finally:
+        mgr.detach()
+
+    if layer not in data.swiglu_internals:
+        return {"tokens": token_strings, "layer": layer, "top_k": top_k,
+                "hidden_dim": 0, "layers": [], "connections": []}
+
+    swiglu = data.swiglu_internals[layer]
+    gate_tensor = swiglu["gate"][0]   # (T, hidden_dim)
+    up_tensor = swiglu["up"][0]       # (T, hidden_dim)
+    gated_tensor = swiglu["gated"][0] # (T, hidden_dim)
+    hidden_dim = gate_tensor.shape[1]
+
+    # FFN output: (T, dim)
+    ffn_output = data.ffn_outputs[layer][0]  # (T, dim)
+
+    # ── Step 1: Find top-K gate neurons by |mean activation| ──
+    gate_mean = gate_tensor.mean(dim=0)        # (hidden_dim,)
+    _, top_gate_idxs = gate_mean.abs().topk(min(top_k, hidden_dim))
+    top_gate_idxs = top_gate_idxs.tolist()
+
+    # ── Step 2: Find top-K input dims by contribution to the top-K gate neurons ──
+    # w_gate.weight shape: (hidden_dim, dim)
+    w_gate_weight = model.layers[layer].feed_forward.w_gate.weight.detach().cpu()
+    w_up_weight = model.layers[layer].feed_forward.w_up.weight.detach().cpu()
+    w_down_weight = model.layers[layer].feed_forward.w_down.weight.detach().cpu()
+
+    # For the selected gate neurons, sum |weight| across those rows to find
+    # which input dims contribute most
+    gate_rows = w_gate_weight[top_gate_idxs, :]  # (top_k, dim)
+    input_importance = gate_rows.abs().sum(dim=0)  # (dim,)
+    _, top_input_idxs = input_importance.topk(min(top_k, input_importance.shape[0]))
+    top_input_idxs = top_input_idxs.tolist()
+
+    # ── Step 3: Find top-K output dims by contribution from top-K gated neurons ──
+    # w_down.weight shape: (dim, hidden_dim)
+    down_cols = w_down_weight[:, top_gate_idxs]  # (dim, top_k)
+    output_importance = down_cols.abs().sum(dim=1)  # (dim,)
+    _, top_output_idxs = output_importance.topk(min(top_k, output_importance.shape[0]))
+    top_output_idxs = top_output_idxs.tolist()
+
+    # ── Step 4: Compute mean activations for each selected neuron ──
+    # Input layer: use the input to the FFN (w_gate input = ffn_norm output)
+    # We can reconstruct input activations from the residual before FFN.
+    # The hook on w_gate captures w_gate(input), so the input to w_gate is not
+    # directly stored. But we can get the residual state before the block's FFN
+    # by using: residual_after_attn = residual_states[layer] - ffn_output
+    # Actually residual_states[layer] = x + ffn_output where x = input_to_block + attn_output
+    # So x (the FFN input before norm) = residual_states[layer] - ffn_output
+    # But we actually want the normed input. Let's approximate with residual - ffn_output
+    # then apply norm. Or simpler: we can use the relationship that
+    # gate = SiLU(w_gate(normed_input)), so normed_input is not directly available.
+    # For activation values, let's use the residual stream value at those dims.
+    residual = data.residual_states[layer][0]  # (T, dim) -- after full block
+    ffn_input_approx = residual - ffn_output   # (T, dim) -- before FFN add
+    input_mean = ffn_input_approx.mean(dim=0)  # (dim,)
+
+    gate_mean_all = gate_tensor.mean(dim=0)    # (hidden_dim,)
+    up_mean = up_tensor.mean(dim=0)            # (hidden_dim,)
+    gated_mean = gated_tensor.mean(dim=0)      # (hidden_dim,)
+    output_mean = ffn_output.mean(dim=0)       # (dim,)
+
+    # ── Step 5: Build layer neuron lists ──
+    layers_out = [
+        {
+            "name": "input",
+            "neurons": [
+                {"idx": int(i), "activation": round(float(input_mean[i]), 4),
+                 "label": f"dim_{i}"}
+                for i in top_input_idxs
+            ],
+        },
+        {
+            "name": "gate (SiLU)",
+            "neurons": [
+                {"idx": int(i), "activation": round(float(gate_mean_all[i]), 4)}
+                for i in top_gate_idxs
+            ],
+        },
+        {
+            "name": "up projection",
+            "neurons": [
+                {"idx": int(i), "activation": round(float(up_mean[i]), 4)}
+                for i in top_gate_idxs
+            ],
+        },
+        {
+            "name": "gated output",
+            "neurons": [
+                {"idx": int(i), "activation": round(float(gated_mean[i]), 4)}
+                for i in top_gate_idxs
+            ],
+        },
+        {
+            "name": "FFN output",
+            "neurons": [
+                {"idx": int(i), "activation": round(float(output_mean[i]), 4)}
+                for i in top_output_idxs
+            ],
+        },
+    ]
+
+    # ── Step 6: Build connections (pruned to top 3 per target neuron) ──
+    connections = []
+
+    # Helper: given a weight submatrix (target_neurons x source_neurons) and
+    # layer indices, emit top-3-per-target connections.
+    def _add_connections(weight_sub, src_layer, src_idxs, tgt_layer, tgt_idxs, top_n=3):
+        # weight_sub: (len(tgt_idxs), len(src_idxs))
+        for ti, tgt_idx in enumerate(tgt_idxs):
+            row = weight_sub[ti]  # (len(src_idxs),)
+            k = min(top_n, row.shape[0])
+            top_vals, top_local = row.abs().topk(k)
+            for li in range(k):
+                local_j = top_local[li].item()
+                src_idx = src_idxs[local_j]
+                w = float(row[local_j])
+                connections.append({
+                    "source_layer": src_layer,
+                    "source_idx": int(src_idx),
+                    "target_layer": tgt_layer,
+                    "target_idx": int(tgt_idx),
+                    "weight": round(w, 4),
+                })
+
+    # input -> gate: w_gate.weight[gate_neurons, input_dims]
+    gate_sub = w_gate_weight[top_gate_idxs, :][:, top_input_idxs]  # (top_k, top_k)
+    _add_connections(gate_sub, 0, top_input_idxs, 1, top_gate_idxs)
+
+    # input -> up: w_up.weight[gate_neurons, input_dims]
+    up_sub = w_up_weight[top_gate_idxs, :][:, top_input_idxs]  # (top_k, top_k)
+    _add_connections(up_sub, 0, top_input_idxs, 2, top_gate_idxs)
+
+    # gate -> gated: element-wise (same indices)
+    for i in top_gate_idxs:
+        connections.append({
+            "source_layer": 1, "source_idx": int(i),
+            "target_layer": 3, "target_idx": int(i),
+            "weight": round(float(gate_mean_all[i]), 4),
+        })
+
+    # up -> gated: element-wise (same indices)
+    for i in top_gate_idxs:
+        connections.append({
+            "source_layer": 2, "source_idx": int(i),
+            "target_layer": 3, "target_idx": int(i),
+            "weight": round(float(up_mean[i]), 4),
+        })
+
+    # gated -> output: w_down.weight[output_dims, gated_neurons]
+    down_sub = w_down_weight[top_output_idxs, :][:, top_gate_idxs]  # (top_k, top_k)
+    _add_connections(down_sub, 3, top_gate_idxs, 4, top_output_idxs)
+
+    return {
+        "tokens": token_strings,
+        "layer": layer,
+        "top_k": top_k,
+        "hidden_dim": hidden_dim,
+        "layers": layers_out,
+        "connections": connections,
+    }
+
+
+def get_neuron_detail(
+    model: LLaMA, token_ids: list[int], device: str = "cpu",
+    layer: int = 0, neuron_idx: int = 0,
+) -> dict:
+    """Return per-token activation for one specific neuron."""
+    tok = _get_tokenizer()
+    token_strings = [tok.id_to_piece(tid) for tid in token_ids]
+    input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+
+    mgr = HookManager(model, mode="inference")
+    mgr.attach()
+    try:
+        with torch.no_grad():
+            model(input_ids)
+        data = mgr.collect()
+    finally:
+        mgr.detach()
+
+    if layer not in data.swiglu_internals or "gate" not in data.swiglu_internals[layer]:
+        return {"tokens": token_strings, "layer": layer, "neuron_idx": neuron_idx, "activations": []}
+
+    gate = data.swiglu_internals[layer]["gate"][0]  # (T, hidden_dim)
+    hidden_dim = gate.shape[1]
+    if neuron_idx >= hidden_dim:
+        return {"tokens": token_strings, "layer": layer, "neuron_idx": neuron_idx, "activations": []}
+
+    per_token = gate[:, neuron_idx].tolist()  # (T,)
+    per_token = [round(v, 4) for v in per_token]
+
+    # Gate weight analysis: which input dims matter most
+    gate_weight = model.layers[layer].feed_forward.w_gate.weight[neuron_idx].detach().cpu()
+    top_weight_vals, top_weight_idxs = gate_weight.abs().topk(10)
+    top_weights = [
+        {"dim": int(idx), "weight": round(float(gate_weight[idx]), 4)}
+        for idx in top_weight_idxs.tolist()
+    ]
+
+    return {
+        "tokens": token_strings,
+        "layer": layer,
+        "neuron_idx": neuron_idx,
+        "activations": per_token,
+        "top_weights": top_weights,
+    }
+
+
+# =========================================================================
+# Attention Flow / Rollout
+# =========================================================================
+
+
+def get_attention_flow(
+    model: LLaMA, token_ids: list[int], device: str = "cpu"
+) -> dict:
+    """Compute attention rollout: accumulated attention across layers."""
+    tok = _get_tokenizer()
+    token_strings = [tok.id_to_piece(tid) for tid in token_ids]
+    input_ids = torch.tensor([token_ids], dtype=torch.long, device=device)
+
+    mgr = HookManager(model, mode="inference")
+    mgr.attach()
+    try:
+        with torch.no_grad():
+            model(input_ids)
+        data = mgr.collect()
+    finally:
+        mgr.detach()
+
+    T = len(token_ids)
+    n_layers = model.config.n_layers
+
+    # Attention rollout: multiply attention matrices across layers
+    rollout = torch.eye(T)  # Start with identity
+
+    for layer_idx in range(n_layers):
+        if layer_idx not in data.attention_weights:
+            continue
+        attn = data.attention_weights[layer_idx]  # (1, n_heads, T, T)
+        # Average across heads
+        avg_attn = attn[0].mean(dim=0)  # (T, T)
+        # Add residual connection: 0.5 * identity + 0.5 * attention
+        avg_attn = 0.5 * torch.eye(T) + 0.5 * avg_attn
+        # Renormalize rows to sum to 1
+        avg_attn = avg_attn / avg_attn.sum(dim=-1, keepdim=True)
+        # Multiply into rollout
+        rollout = avg_attn @ rollout
+
+    return {
+        "tokens": token_strings,
+        "rollout": rollout.tolist(),
     }

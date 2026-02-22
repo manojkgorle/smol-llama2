@@ -15,6 +15,7 @@
 var _attrData = null;       // cached /api/attribution response
 var _attrPrompt = '';       // current prompt text
 var _selectedPos = null;    // currently selected token position for DLA
+var _attrViewMode = 'logit-lens';  // 'logit-lens' or 'waterfall'
 
 // ---------------------------------------------------------------------------
 // Init
@@ -25,40 +26,62 @@ function initAttribution() {
 
     createPromptInput('attribution-controls', function (prompt) {
         _attrPrompt = prompt;
-        analyzeAttribution(prompt);
+        if (_attrViewMode === 'waterfall') {
+            _analyzeWaterfall(prompt);
+        } else {
+            analyzeAttribution(prompt);
+        }
     }, { placeholder: 'Enter a prompt for logit attribution...', buttonLabel: 'Analyze' });
+
+    // View switcher
+    var viewSwitcher = document.createElement('div');
+    viewSwitcher.className = 'view-switcher';
+    viewSwitcher.id = 'attr-view-switcher';
+
+    var btnLens = document.createElement('button');
+    btnLens.className = 'active';
+    btnLens.textContent = 'Logit Lens';
+    btnLens.dataset.view = 'logit-lens';
+
+    var btnWaterfall = document.createElement('button');
+    btnWaterfall.textContent = 'Waterfall';
+    btnWaterfall.dataset.view = 'waterfall';
+
+    viewSwitcher.appendChild(btnLens);
+    viewSwitcher.appendChild(btnWaterfall);
+    controls.appendChild(viewSwitcher);
+
+    viewSwitcher.querySelectorAll('button').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            viewSwitcher.querySelectorAll('button').forEach(function (b) { b.classList.remove('active'); });
+            btn.classList.add('active');
+            _attrViewMode = btn.dataset.view;
+            if (_attrPrompt) {
+                if (_attrViewMode === 'waterfall') {
+                    _analyzeWaterfall(_attrPrompt);
+                } else {
+                    analyzeAttribution(_attrPrompt);
+                }
+            }
+        });
+    });
 
     // Build detail area containers
     var detail = document.getElementById('attribution-detail');
     if (!detail) return;
 
-    detail.innerHTML =
-        '<div class="chart-card full-width" id="attr-predictions-card">' +
-            '<div class="chart-title">Next Token Prediction</div>' +
-            '<div id="attr-predictions"></div>' +
-        '</div>' +
-
-        '<div class="chart-card full-width" id="attr-logit-lens-card">' +
-            '<div class="chart-title">Logit Lens</div>' +
-            '<div id="attr-logit-lens"></div>' +
-        '</div>' +
-
-        '<div class="chart-card full-width" id="attr-contrib-card">' +
-            '<div class="chart-title">Layer Contributions</div>' +
-            '<div class="chart-container" id="attr-contrib-chart"></div>' +
-        '</div>' +
-
-        '<div class="chart-card full-width" id="attr-dla-card">' +
-            '<div class="chart-title">Direct Logit Attribution — click a token above</div>' +
-            '<div class="chart-container" id="attr-dla-heatmap"></div>' +
-            '<div class="chart-container" id="attr-dla-ffn"></div>' +
-        '</div>';
+    _buildAttributionContainers(detail);
 }
 
 // ---------------------------------------------------------------------------
 // Fetch
 // ---------------------------------------------------------------------------
 async function analyzeAttribution(prompt) {
+    // Ensure containers exist (may have been replaced by waterfall)
+    var detail = document.getElementById('attribution-detail');
+    if (detail && !document.getElementById('attr-predictions-card')) {
+        _buildAttributionContainers(detail);
+    }
     showLoading('attribution-detail');
     try {
         var data = await apiFetch('/api/attribution', {
@@ -313,6 +336,69 @@ async function _fetchDLA(pos) {
     }
 }
 
+function _buildAttributionContainers(detail) {
+    detail.innerHTML = '';
+
+    // Predictions card with help icon
+    var predsCard = document.createElement('div');
+    predsCard.className = 'chart-card full-width';
+    predsCard.id = 'attr-predictions-card';
+    var predsTitle = document.createElement('div');
+    predsTitle.className = 'chart-title';
+    predsTitle.textContent = 'Next Token Prediction';
+    predsCard.appendChild(predsTitle);
+    predsCard.innerHTML += '<div id="attr-predictions"></div>';
+    detail.appendChild(predsCard);
+
+    // Logit lens card with help icon
+    var lensCard = document.createElement('div');
+    lensCard.className = 'chart-card full-width';
+    lensCard.id = 'attr-logit-lens-card';
+    var lensTitle = document.createElement('div');
+    lensTitle.className = 'chart-title';
+    lensTitle.textContent = 'Logit Lens';
+    lensTitle.appendChild(createHelpIcon('Logit Lens',
+        'We peek at the model\'s prediction at <strong>every layer</strong> by applying the final output projection to intermediate representations. ' +
+        'This reveals <strong>when and where</strong> the model "decides" on its answer. ' +
+        'Highlighted pills show the target token appearing in top predictions.'
+    ));
+    lensCard.appendChild(lensTitle);
+    lensCard.innerHTML += '<div id="attr-logit-lens"></div>';
+    detail.appendChild(lensCard);
+
+    // Layer contributions card with help icon
+    var contribCard = document.createElement('div');
+    contribCard.className = 'chart-card full-width';
+    contribCard.id = 'attr-contrib-card';
+    var contribTitle = document.createElement('div');
+    contribTitle.className = 'chart-title';
+    contribTitle.textContent = 'Layer Contributions';
+    contribTitle.appendChild(createHelpIcon('Layer Contributions',
+        'Shows the <strong>marginal contribution</strong> of each layer to the target token\'s logit. ' +
+        'Positive bars push the model toward the correct answer. ' +
+        'Negative bars push away from it. The embedding provides the initial signal.'
+    ));
+    contribCard.appendChild(contribTitle);
+    contribCard.innerHTML += '<div class="chart-container" id="attr-contrib-chart"></div>';
+    detail.appendChild(contribCard);
+
+    // DLA card with help icon
+    var dlaCard = document.createElement('div');
+    dlaCard.className = 'chart-card full-width';
+    dlaCard.id = 'attr-dla-card';
+    var dlaTitle = document.createElement('div');
+    dlaTitle.className = 'chart-title';
+    dlaTitle.textContent = 'Direct Logit Attribution — click a token above';
+    dlaTitle.appendChild(createHelpIcon('DLA',
+        '<strong>Direct Logit Attribution</strong> decomposes the final logit into contributions from each attention head and FFN layer. ' +
+        'It measures how much each component <strong>directly</strong> pushes toward or away from the target token, ' +
+        'by projecting component outputs onto the unembedding direction.'
+    ));
+    dlaCard.appendChild(dlaTitle);
+    dlaCard.innerHTML += '<div class="chart-container" id="attr-dla-heatmap"></div><div class="chart-container" id="attr-dla-ffn"></div>';
+    detail.appendChild(dlaCard);
+}
+
 function _renderDLA(data) {
     var cardTitle = document.querySelector('#attr-dla-card .chart-title');
     if (cardTitle) {
@@ -375,4 +461,118 @@ function _renderDLA(data) {
         yaxis: { title: 'Logit Contribution', gridcolor: 'rgba(255,255,255,0.06)' },
         margin: { t: 44, b: 48 },
     }), window.PLOTLY_CONFIG);
+}
+
+// ---------------------------------------------------------------------------
+// Token Probability Waterfall
+// ---------------------------------------------------------------------------
+async function _analyzeWaterfall(prompt) {
+    var detail = document.getElementById('attribution-detail');
+    if (!detail) return;
+    detail.innerHTML = '';
+
+    var strip = document.getElementById('attribution-token-strip');
+    if (strip) strip.innerHTML = '';
+
+    // Waterfall card
+    var card = document.createElement('div');
+    card.className = 'chart-card full-width';
+    var title = document.createElement('div');
+    title.className = 'chart-title';
+    title.textContent = 'Token Probability Waterfall';
+    title.appendChild(createHelpIcon('Probability Waterfall',
+        'Shows how confident the model is in the <strong>correct next token</strong> at each layer. ' +
+        '<strong>Bright green</strong> = high confidence. <strong>Dark</strong> = low confidence. ' +
+        'Sudden jumps reveal which layers are <strong>critical</strong> for making the prediction. ' +
+        'Click any cell to see top-5 predictions at that depth/position.'
+    ));
+    card.appendChild(title);
+
+    var chartDiv = document.createElement('div');
+    chartDiv.id = 'attr-waterfall-chart';
+    chartDiv.style.minHeight = '400px';
+    card.appendChild(chartDiv);
+
+    var detailDiv = document.createElement('div');
+    detailDiv.id = 'attr-waterfall-detail';
+    card.appendChild(detailDiv);
+
+    detail.appendChild(card);
+    showInlineLoading('attr-waterfall-chart');
+
+    try {
+        var data = await apiFetch('/api/waterfall', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt }),
+        });
+
+        var tokens = data.tokens;
+        var depthLabels = data.depth_labels;
+        var probMatrix = data.probability_matrix;
+
+        // Build position labels (token[pos] -> target)
+        var yLabels = [];
+        for (var i = 0; i < probMatrix.length; i++) {
+            yLabels.push(tokens[i] + ' → ' + tokens[i + 1]);
+        }
+
+        // Transpose for plotly: z[y][x]
+        Plotly.newPlot('attr-waterfall-chart', [{
+            z: probMatrix,
+            x: depthLabels.map(function (d) { return d === 'embedding' ? 'Emb' : 'L' + d; }),
+            y: yLabels,
+            type: 'heatmap',
+            colorscale: [
+                [0, '#09090b'],
+                [0.25, '#064e3b'],
+                [0.5, '#059669'],
+                [0.75, '#34d399'],
+                [1, '#6ee7b7'],
+            ],
+            colorbar: {
+                title: 'P(target)',
+                tickformat: '.0%',
+                tickfont: { color: '#e0e0e0' },
+                titlefont: { color: '#e0e0e0' },
+            },
+            hovertemplate: 'Pos: %{y}<br>Depth: %{x}<br>P(target): %{z:.4f}<extra></extra>',
+        }], darkLayout({
+            title: { text: 'P(correct next token) by Layer Depth', font: { size: 14 } },
+            xaxis: { title: 'Depth', side: 'bottom', gridcolor: 'rgba(255,255,255,0.06)' },
+            yaxis: { title: 'Position', autorange: 'reversed', gridcolor: 'rgba(255,255,255,0.06)' },
+            height: Math.max(400, probMatrix.length * 28 + 120),
+            margin: { t: 44, b: 60, l: 120 },
+        }), window.PLOTLY_CONFIG);
+
+        // Click handler to show predictions at that cell
+        var chartEl = document.getElementById('attr-waterfall-chart');
+        chartEl.on('plotly_click', function (clickData) {
+            if (clickData.points && clickData.points.length > 0) {
+                var pt = clickData.points[0];
+                var posIdx = pt.y;
+                var depthIdx = pt.x;
+
+                // Find indices
+                var yIdx = yLabels.indexOf(posIdx);
+                var xIdx = depthLabels.map(function (d) { return d === 'embedding' ? 'Emb' : 'L' + d; }).indexOf(depthIdx);
+
+                if (yIdx >= 0 && xIdx >= 0 && data.predictions_by_depth[yIdx] && data.predictions_by_depth[yIdx][xIdx]) {
+                    var preds = data.predictions_by_depth[yIdx][xIdx];
+                    var html = '<div style="margin-top:12px; padding:12px 16px; background:var(--bg-card); border:1px solid var(--border); border-radius:8px;">' +
+                        '<div style="font-size:11px; color:var(--text-muted); font-family:var(--font-mono); margin-bottom:8px;">Top-5 at ' + posIdx + ' / ' + depthIdx + '</div>';
+                    html += '<div class="prediction-runners">';
+                    for (var pi = 0; pi < preds.length; pi++) {
+                        html += '<span class="prediction-pill">' +
+                            '<span class="prediction-pill-token">' + escapeHtml(preds[pi].token) + '</span>' +
+                            '<span class="prediction-pill-prob">' + (preds[pi].prob * 100).toFixed(1) + '%</span></span>';
+                    }
+                    html += '</div></div>';
+                    detailDiv.innerHTML = html;
+                }
+            }
+        });
+    } catch (err) {
+        showError('attr-waterfall-chart', err.message);
+    }
 }
