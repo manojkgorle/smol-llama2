@@ -43,6 +43,26 @@ function initActivations() {
     var chartsRoot = document.getElementById('activations-charts');
     if (!chartsRoot) return;
 
+    // Guide text shown before first analysis
+    chartsRoot.innerHTML =
+        '<div id="act-guide" class="tab-guide">' +
+            '<div class="guide-title">Activation Explorer</div>' +
+            '<p>Inspect internal activations at every layer of the model. ' +
+            'This model uses <strong>SwiGLU</strong> feed-forward networks — a gated activation that learns which neurons to activate.</p>' +
+            '<div class="guide-features">' +
+                '<div class="guide-item"><span class="guide-tag">residual</span>L2 norms of the residual stream at each token position per layer.</div>' +
+                '<div class="guide-item"><span class="guide-tag">attn vs ffn</span>Compare how much each sub-layer contributes to the output.</div>' +
+                '<div class="guide-item"><span class="guide-tag">swiglu</span>Gate, up-projection, and gated-product histograms revealing activation distributions.</div>' +
+                '<div class="guide-item"><span class="guide-tag">sparsity</span>What fraction of gate neurons are near-zero — higher means more selective computation.</div>' +
+            '</div>' +
+            '<p class="guide-hint">Enter a prompt above and click <strong>Analyze</strong> to begin.</p>' +
+        '</div>';
+}
+
+function _buildChartContainers() {
+    var chartsRoot = document.getElementById('activations-charts');
+    if (!chartsRoot) return;
+
     // Residual norms — full width
     chartsRoot.innerHTML =
         '<div class="chart-card full-width" id="act-residual-card">' +
@@ -80,6 +100,7 @@ function initActivations() {
 // Fetch
 // ---------------------------------------------------------------------------
 async function analyzeActivations(prompt) {
+    _buildChartContainers();
     showLoading('activations-charts');
     try {
         var data = await apiFetch('/api/activations', {
@@ -113,9 +134,9 @@ function _renderLayerCharts() {
     if (!layer) return;
 
     _renderResidualNorms(layer);
-    _renderSwiGLUHistogram('act-gate-chart', layer, 'gate', '#e94560');
-    _renderSwiGLUHistogram('act-up-chart', layer, 'up', '#4ecca3');
-    _renderSwiGLUHistogram('act-gated-chart', layer, 'gated', '#f0a500');
+    _renderSwiGLUHistogram('act-gate-chart', layer, 'gate', '#f87171');
+    _renderSwiGLUHistogram('act-up-chart', layer, 'up', '#34d399');
+    _renderSwiGLUHistogram('act-gated-chart', layer, 'gated', '#fbbf24');
 }
 
 function _renderResidualNorms(layer) {
@@ -131,8 +152,8 @@ function _renderResidualNorms(layer) {
         marker: { color: window.LAYER_COLORS[_actLayer] },
     }], darkLayout({
         title: { text: 'Residual Stream L2 Norms — Layer ' + _actLayer, font: { size: 14 } },
-        xaxis: { title: 'Position', gridcolor: '#2a2a4a', tickangle: -45 },
-        yaxis: { title: 'L2 Norm', gridcolor: '#2a2a4a' },
+        xaxis: { title: 'Position', gridcolor: 'rgba(255,255,255,0.06)', tickangle: -45 },
+        yaxis: { title: 'L2 Norm', gridcolor: 'rgba(255,255,255,0.06)' },
         margin: { t: 44, b: 80 },
     }), window.PLOTLY_CONFIG);
 }
@@ -158,8 +179,8 @@ function _renderSwiGLUHistogram(containerId, layer, key, color) {
         hovertemplate: 'bin: %{x:.3f}<br>count: %{y}<extra></extra>',
     }], darkLayout({
         title: { text: label + ' — Layer ' + _actLayer + '<br><sub>' + subtitle + '</sub>', font: { size: 13 } },
-        xaxis: { title: 'Activation Value', gridcolor: '#2a2a4a' },
-        yaxis: { title: 'Count', gridcolor: '#2a2a4a' },
+        xaxis: { title: 'Activation Value', gridcolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Count', gridcolor: 'rgba(255,255,255,0.06)' },
         bargap: 0.05,
         margin: { t: 56, b: 48 },
     }), window.PLOTLY_CONFIG);
@@ -197,20 +218,20 @@ function _renderAttnVsFfn() {
             name: 'Attention',
             x: labels,
             y: attnMeans,
-            marker: { color: '#3282b8' },
+            marker: { color: '#818cf8' },
         },
         {
             type: 'bar',
             name: 'FFN',
             x: labels,
             y: ffnMeans,
-            marker: { color: '#bb86fc' },
+            marker: { color: '#a78bfa' },
         },
     ], darkLayout({
         title: { text: 'Attention vs FFN Output Norms (mean over positions)', font: { size: 14 } },
         barmode: 'group',
-        xaxis: { title: 'Layer', gridcolor: '#2a2a4a' },
-        yaxis: { title: 'Mean L2 Norm', gridcolor: '#2a2a4a' },
+        xaxis: { title: 'Layer', gridcolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Mean L2 Norm', gridcolor: 'rgba(255,255,255,0.06)' },
         margin: { t: 44, b: 48 },
     }), window.PLOTLY_CONFIG);
 }
@@ -239,8 +260,8 @@ function _renderGateSparsity() {
         hovertemplate: '%{x}<br>Sparsity: %{y:.4f}<extra></extra>',
     }], darkLayout({
         title: { text: 'Gate Sparsity Across Layers (fraction |gate| < 0.01)', font: { size: 14 } },
-        xaxis: { title: 'Layer', gridcolor: '#2a2a4a' },
-        yaxis: { title: 'Sparsity', gridcolor: '#2a2a4a', range: [0, 1] },
+        xaxis: { title: 'Layer', gridcolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Sparsity', gridcolor: 'rgba(255,255,255,0.06)', range: [0, 1] },
         margin: { t: 44, b: 48 },
     }), window.PLOTLY_CONFIG);
 }

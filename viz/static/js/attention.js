@@ -85,6 +85,22 @@ function _buildViewArea() {
     var viewArea = document.getElementById('attention-view');
     if (!viewArea) return;
 
+    // Helper text shown before first analysis
+    var guide = document.createElement('div');
+    guide.id = 'attn-guide';
+    guide.className = 'tab-guide';
+    guide.innerHTML =
+        '<div class="guide-title">Attention Inspector</div>' +
+        '<p>Visualize how each attention head distributes focus across tokens. ' +
+        'This model uses <strong>Grouped-Query Attention</strong> (GQA) — 6 query heads share 2 KV heads.</p>' +
+        '<div class="guide-features">' +
+            '<div class="guide-item"><span class="guide-tag">all heads</span>Mini heatmaps for every head at a chosen layer. Click to expand.</div>' +
+            '<div class="guide-item"><span class="guide-tag">entropy</span>Which heads focus sharply vs. spread attention uniformly.</div>' +
+            '<div class="guide-item"><span class="guide-tag">ablation</span>Zero out each head and measure how loss changes. Shows which heads matter most.</div>' +
+        '</div>' +
+        '<p class="guide-hint">Enter a prompt above and click <strong>Inspect</strong> to begin.</p>';
+    viewArea.appendChild(guide);
+
     var mainArea = document.createElement('div');
     mainArea.id = 'attn-main-area';
     viewArea.appendChild(mainArea);
@@ -125,6 +141,10 @@ function _hideTooltip() {
 // analyzeAttention — fetch attention + ablation data
 // ---------------------------------------------------------------------------
 function analyzeAttention(prompt) {
+    // Hide the guide on first analysis
+    var guide = document.getElementById('attn-guide');
+    if (guide) guide.style.display = 'none';
+
     var mainArea = document.getElementById('attn-main-area');
     if (!mainArea) return;
     mainArea.innerHTML = '';
@@ -357,8 +377,8 @@ function _renderEntropyView(container) {
     };
 
     var layout = darkLayout({
-        xaxis: { title: 'Attention Head', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a', dtick: 1 },
-        yaxis: { title: 'Layer', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a', dtick: 1, autorange: true },
+        xaxis: { title: 'Attention Head', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)', dtick: 1 },
+        yaxis: { title: 'Layer', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)', dtick: 1, autorange: true },
         margin: { t: 36, r: 100, b: 60, l: 80 },
     });
 
@@ -432,8 +452,8 @@ function _renderAblationView(container) {
     };
 
     var layout = darkLayout({
-        xaxis: { title: 'Attention Head', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a', dtick: 1 },
-        yaxis: { title: 'Layer', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a', dtick: 1, autorange: true },
+        xaxis: { title: 'Attention Head', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)', dtick: 1 },
+        yaxis: { title: 'Layer', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)', dtick: 1, autorange: true },
         margin: { t: 36, r: 100, b: 60, l: 80 },
     });
 
@@ -524,7 +544,7 @@ function _drawD3Heatmap(container, weights, tokens, options) {
                 .attr('transform', 'rotate(-45,' + (ki2 * cellSize + cellSize / 2) + ',-4)')
                 .style('font-size', isMini ? '7px' : '10px')
                 .style('font-family', 'var(--font-mono)')
-                .style('fill', '#8892a4')
+                .style('fill', '#71717a')
                 .text(_truncateToken(tokens[ki2], isMini ? 4 : 8));
         }
 
@@ -536,7 +556,7 @@ function _drawD3Heatmap(container, weights, tokens, options) {
                 .attr('text-anchor', 'end')
                 .style('font-size', isMini ? '7px' : '10px')
                 .style('font-family', 'var(--font-mono)')
-                .style('fill', '#8892a4')
+                .style('fill', '#71717a')
                 .text(_truncateToken(tokens[qi2], isMini ? 4 : 8));
         }
     }

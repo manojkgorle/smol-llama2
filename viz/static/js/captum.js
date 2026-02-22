@@ -53,7 +53,7 @@ function buildCaptumTokenStrip(container, tokens, scores, interpolator, divergin
         var rgb = d3.color(color);
         if (rgb) {
             var lum = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
-            span.style.color = lum > 140 ? '#1a1a2e' : '#ffffff';
+            span.style.color = lum > 140 ? '#09090b' : '#ffffff';
         }
 
         strip.appendChild(span);
@@ -273,7 +273,7 @@ function initCaptum() {
 
                 // Color bars by sign: positive = red, negative = blue
                 var barColors = attributions.map(function (a) {
-                    return a >= 0 ? '#e94560' : '#3282b8';
+                    return a >= 0 ? '#f87171' : '#818cf8';
                 });
 
                 var trace = {
@@ -319,13 +319,31 @@ function initCaptum() {
                 setButtonsDisabled(false);
                 resultsRoot.innerHTML = '';
 
-                // data.tokens: string array
-                // data.conductance: 2D array [n_tokens x n_layers]
+                // API returns layer_conductance: {layer_idx: [per_token_scores]}
+                // or conductance: 2D array. Convert dict to 2D array [n_tokens x n_layers].
                 var tokens = data.tokens;
-                var conductance = data.conductance;
+                var rawConductance = data.conductance || data.layer_conductance;
+                var conductance;
+                var nLayers = window.N_LAYERS;
+
+                if (rawConductance && !Array.isArray(rawConductance)) {
+                    // Dict format: {0: [scores], 1: [scores], ...} → transpose to [tokens x layers]
+                    var nTokens = tokens.length;
+                    conductance = [];
+                    for (var ti = 0; ti < nTokens; ti++) {
+                        var row = [];
+                        for (var li = 0; li < nLayers; li++) {
+                            var layerScores = rawConductance[String(li)] || rawConductance[li];
+                            row.push(layerScores ? (layerScores[ti] || 0) : 0);
+                        }
+                        conductance.push(row);
+                    }
+                } else {
+                    conductance = rawConductance || [];
+                }
 
                 var layerLabels = [];
-                for (var l = 0; l < window.N_LAYERS; l++) {
+                for (var l = 0; l < nLayers; l++) {
                     layerLabels.push('Layer ' + l);
                 }
 

@@ -13,27 +13,66 @@ from llama_vc.model import LLaMA
 from viz.analysis import _get_tokenizer
 
 
+class _TensorOnlyLayer(nn.Module):
+    """Wraps a TransformerBlock so it returns only the hidden state tensor.
+
+    TransformerBlock.forward() returns (h, kv_cache).  Captum's
+    LayerConductance hooks the layer output and expects a single tensor,
+    so this adapter strips the kv_cache from the return value.
+    """
+
+    def __init__(self, block, freqs_cos, freqs_sin):
+        super().__init__()
+        self.block = block
+        self.freqs_cos = freqs_cos
+        self.freqs_sin = freqs_sin
+
+    def forward(self, h: torch.Tensor) -> torch.Tensor:
+        out, _ = self.block(h, self.freqs_cos, self.freqs_sin)
+        return out
+
+
 class CaptumModelWrapper(nn.Module):
     """Wraps LLaMA so Captum can attribute over embedding space.
 
     Bypasses tok_embeddings, feeding embeddings directly into transformer layers.
     Returns a scalar (the logit for the target token at the target position).
+
+    When ``tensor_only_layers=True`` each TransformerBlock is wrapped in
+    :class:`_TensorOnlyLayer` so that Captum hooks see a plain tensor
+    output instead of the ``(h, kv_cache)`` tuple.
     """
 
-    def __init__(self, model: LLaMA, target_id: int, target_position: int = -1):
+    def __init__(self, model: LLaMA, target_id: int, target_position: int = -1,
+                 *, seq_len: int | None = None, tensor_only_layers: bool = False):
         super().__init__()
         self.model = model
         self.target_id = target_id
         self.target_position = target_position
 
+        if tensor_only_layers:
+            assert seq_len is not None, "seq_len required for tensor_only_layers"
+            freqs_cos = model.freqs_cos[:seq_len].to(next(model.parameters()).device)
+            freqs_sin = model.freqs_sin[:seq_len].to(next(model.parameters()).device)
+            self.wrapped_layers = nn.ModuleList([
+                _TensorOnlyLayer(block, freqs_cos, freqs_sin)
+                for block in model.layers
+            ])
+        else:
+            self.wrapped_layers = None
+
     def forward(self, input_embeds: torch.Tensor) -> torch.Tensor:
         """input_embeds: (B, T, dim) -> scalar logit for target token."""
         h = input_embeds
-        freqs_cos = self.model.freqs_cos[:h.shape[1]].to(h.device)
-        freqs_sin = self.model.freqs_sin[:h.shape[1]].to(h.device)
 
-        for layer in self.model.layers:
-            h, _ = layer(h, freqs_cos, freqs_sin)
+        if self.wrapped_layers is not None:
+            for wl in self.wrapped_layers:
+                h = wl(h)
+        else:
+            freqs_cos = self.model.freqs_cos[:h.shape[1]].to(h.device)
+            freqs_sin = self.model.freqs_sin[:h.shape[1]].to(h.device)
+            for layer in self.model.layers:
+                h, _ = layer(h, freqs_cos, freqs_sin)
 
         h = self.model.norm(h)
         logits = self.model.output(h)  # (B, T, vocab_size)
@@ -127,14 +166,17 @@ def get_layer_conductance(
     with torch.no_grad():
         input_embeds = model.tok_embeddings(input_ids)
 
-    wrapper = CaptumModelWrapper(model, target_id, target_position)
+    wrapper = CaptumModelWrapper(
+        model, target_id, target_position,
+        seq_len=T, tensor_only_layers=True,
+    )
     wrapper.eval()
 
     baseline = torch.zeros_like(input_embeds)
     layer_conductance = {}
 
-    for i, layer in enumerate(model.layers):
-        lc = LayerConductance(wrapper, layer)
+    for i, wl in enumerate(wrapper.wrapped_layers):
+        lc = LayerConductance(wrapper, wl)
         input_embeds_attr = input_embeds.clone().requires_grad_(True)
         conductance = lc.attribute(input_embeds_attr, baseline, n_steps=10)
         # conductance shape: (1, T, dim)

@@ -38,16 +38,20 @@ function renderPredictionComparison(containerId, baselinePreds, comparedPreds, b
             return panel;
         }
 
-        // Find max probability for bar scaling
+        // Find max probability for bar scaling (API may use 'prob' or 'probability')
         var maxProb = 0;
         preds.forEach(function (p) {
-            if (p.probability > maxProb) maxProb = p.probability;
+            var v = p.probability !== undefined ? p.probability : (p.prob || 0);
+            if (v > maxProb) maxProb = v;
         });
         if (maxProb === 0) maxProb = 1;
 
         preds.forEach(function (p) {
             var row = document.createElement('div');
             row.className = 'pred-row';
+
+            var prob = p.probability !== undefined ? p.probability : p.prob;
+            if (prob === undefined || prob === null || isNaN(prob)) prob = 0;
 
             var tokenEl = document.createElement('span');
             tokenEl.className = 'pred-token';
@@ -57,13 +61,13 @@ function renderPredictionComparison(containerId, baselinePreds, comparedPreds, b
             barContainer.className = 'pred-bar-container';
             var bar = document.createElement('div');
             bar.className = 'pred-bar';
-            bar.style.width = ((p.probability / maxProb) * 100).toFixed(1) + '%';
+            bar.style.width = ((prob / maxProb) * 100).toFixed(1) + '%';
             bar.style.background = barColor;
             barContainer.appendChild(bar);
 
             var probEl = document.createElement('span');
             probEl.className = 'pred-prob';
-            probEl.textContent = (p.probability * 100).toFixed(1) + '%';
+            probEl.textContent = (prob * 100).toFixed(1) + '%';
 
             row.appendChild(tokenEl);
             row.appendChild(barContainer);
@@ -217,11 +221,20 @@ function initCircuits() {
             .then(function (data) {
                 hideLoading(patchResultsId);
 
-                // data.recovery: 2D array [8 layers x 3 components]
-                var recovery = data.recovery;
+                // API returns patching_results: [{layer, residual, attn, ffn}, ...]
+                // Convert to 2D array [n_layers x 3 components]
                 var components = ['residual', 'attn', 'ffn'];
+                var results = data.patching_results || data.recovery || [];
+                var recovery;
+                if (results.length > 0 && typeof results[0] === 'object' && !Array.isArray(results[0])) {
+                    recovery = results.map(function (r) {
+                        return [r.residual || 0, r.attn || 0, r.ffn || 0];
+                    });
+                } else {
+                    recovery = results;
+                }
                 var layerLabels = [];
-                for (var i = 0; i < window.N_LAYERS; i++) layerLabels.push('Layer ' + i);
+                for (var i = 0; i < recovery.length; i++) layerLabels.push('Layer ' + i);
 
                 var trace = {
                     z: recovery,
@@ -242,22 +255,29 @@ function initCircuits() {
 
                 Plotly.newPlot('circuits-patch-heatmap', [trace], layout, window.PLOTLY_CONFIG);
 
-                // Summary: find max recovery
-                var maxVal = -Infinity;
+                // Summary: use API max_recovery or compute from matrix
+                var maxVal = 0;
                 var maxLayer = 0;
                 var maxComp = '';
-                for (var li = 0; li < recovery.length; li++) {
-                    for (var ci = 0; ci < recovery[li].length; ci++) {
-                        if (recovery[li][ci] > maxVal) {
-                            maxVal = recovery[li][ci];
-                            maxLayer = li;
-                            maxComp = components[ci];
+                if (data.max_recovery) {
+                    maxVal = data.max_recovery.recovery || 0;
+                    maxLayer = data.max_recovery.layer || 0;
+                    maxComp = data.max_recovery.component || '';
+                } else {
+                    for (var li = 0; li < recovery.length; li++) {
+                        for (var ci = 0; ci < recovery[li].length; ci++) {
+                            if (Math.abs(recovery[li][ci]) > Math.abs(maxVal)) {
+                                maxVal = recovery[li][ci];
+                                maxLayer = li;
+                                maxComp = components[ci];
+                            }
                         }
                     }
                 }
 
                 summaryDiv.className = 'summary-text';
-                summaryDiv.textContent = 'Max recovery: ' + (maxVal * 100).toFixed(1) + '% at Layer ' + maxLayer + ' (' + maxComp + '). This component has the strongest causal effect on the output difference between clean and corrupted prompts.';
+                summaryDiv.textContent = 'Max recovery: ' + (maxVal * 100).toFixed(1) + '% at Layer ' + maxLayer + ' (' + maxComp + '). ' +
+                    'Logit gap (clean \u2212 corrupted): ' + (data.logit_gap || 0).toFixed(3) + ' for target "' + (data.target_token || '') + '".';
             })
             .catch(function (err) {
                 hideLoading(patchResultsId);
@@ -662,12 +682,10 @@ function initCircuits() {
             .then(function (data) {
                 hideLoading(precompResultsId);
 
-                // data.heatmap: 2D array [T x 4] (positions x future offsets)
-                // data.tokens: token labels for each position
-                // data.findings: array of {position, token, future_token, offset, earliest_layer, text}
-                var heatmap = data.heatmap;
+                // API returns precomputation_matrix (or heatmap) and findings
+                var heatmap = data.precomputation_matrix || data.heatmap || [];
                 var tokens = data.tokens || [];
-                var offsets = ['+2', '+3', '+4', '+5'];
+                var offsets = (data.future_offsets || [2, 3, 4, 5]).map(function (o) { return '+' + o; });
 
                 var posLabels = [];
                 for (var ti = 0; ti < heatmap.length; ti++) {
@@ -680,11 +698,11 @@ function initCircuits() {
                     y: posLabels,
                     type: 'heatmap',
                     colorscale: [
-                        [0, '#16213e'],
-                        [0.25, '#0f3460'],
-                        [0.5, '#e94560'],
-                        [0.75, '#f0a500'],
-                        [1, '#4ecca3'],
+                        [0, '#111113'],
+                        [0.25, '#1e1e2e'],
+                        [0.5, '#f87171'],
+                        [0.75, '#fbbf24'],
+                        [1, '#34d399'],
                     ],
                     colorbar: { title: 'Earliest Layer' },
                     hovertemplate: 'Position: %{y}<br>Offset: %{x}<br>Earliest Layer: %{z}<extra></extra>',
@@ -719,21 +737,24 @@ function initCircuits() {
                         var f = findings[fi];
                         var li = document.createElement('li');
 
-                        // Depth badge
+                        // Depth badge — API uses first_depth_idx or earliest_layer
+                        var depthIdx = f.first_depth_idx !== undefined ? f.first_depth_idx : (f.earliest_layer || 0);
                         var badge = document.createElement('span');
                         badge.className = 'finding-depth-badge';
                         var depthClass = 'early';
-                        if (f.earliest_layer >= Math.floor(window.N_LAYERS / 3) && f.earliest_layer < Math.floor(2 * window.N_LAYERS / 3)) {
+                        if (depthIdx >= Math.floor(window.N_LAYERS / 3) && depthIdx < Math.floor(2 * window.N_LAYERS / 3)) {
                             depthClass = 'mid';
-                        } else if (f.earliest_layer >= Math.floor(2 * window.N_LAYERS / 3)) {
+                        } else if (depthIdx >= Math.floor(2 * window.N_LAYERS / 3)) {
                             depthClass = 'late';
                         }
                         badge.classList.add(depthClass);
-                        badge.textContent = 'L' + f.earliest_layer + ' (' + depthClass + ')';
+                        var depthLabel = f.first_depth || ('L' + depthIdx);
+                        badge.textContent = depthLabel + ' (' + depthClass + ')';
 
+                        var offset = f.future_offset || f.offset || '?';
                         var text = document.createElement('span');
                         text.textContent = f.text || (
-                            'Position ' + f.position + ' "' + (f.token || '') + '" pre-computes "' + (f.future_token || '') + '" at offset ' + f.offset
+                            'Position ' + f.position + ' "' + (f.token || '') + '" pre-computes "' + (f.future_token || '') + '" at offset +' + offset
                         );
 
                         li.appendChild(badge);

@@ -27,27 +27,27 @@ window.N_KV_GROUPS = 3;
 
 // GQA group colors: warm for group 0, cool for group 1
 window.GQA_COLORS = {
-    group0: ['#ff6b6b', '#ff8787', '#ffa3a3'],  // heads 0,1,2
-    group1: ['#4ecdc4', '#72ddd6', '#96ede8'],   // heads 3,4,5
+    group0: ['#f87171', '#fca5a5', '#fecaca'],  // heads 0,1,2
+    group1: ['#22d3ee', '#67e8f9', '#a5f3fc'],   // heads 3,4,5
 };
 
 // 8-layer color palette
 window.LAYER_COLORS = [
-    '#e94560', '#f0a500', '#4ecca3', '#3282b8',
-    '#bb86fc', '#ff6b6b', '#4ecdc4', '#f7d794',
+    '#f87171', '#fb923c', '#fbbf24', '#34d399',
+    '#22d3ee', '#818cf8', '#a78bfa', '#f472b6',
 ];
 
 // ---------------------------------------------------------------------------
 // Shared Plotly layout / config
 // ---------------------------------------------------------------------------
 window.PLOTLY_DARK_LAYOUT = {
-    paper_bgcolor: '#1a1a2e',
-    plot_bgcolor: '#16213e',
-    font: { color: '#e0e0e0', family: '-apple-system, BlinkMacSystemFont, sans-serif' },
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(255,255,255,0.012)',
+    font: { color: '#a1a1aa', family: 'Inter, -apple-system, BlinkMacSystemFont, sans-serif', size: 12 },
     margin: { t: 36, r: 24, b: 48, l: 56 },
-    xaxis: { gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
-    yaxis: { gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
-    legend: { bgcolor: 'rgba(22,33,62,0.8)', bordercolor: '#2a2a4a', borderwidth: 1, font: { size: 11 } },
+    xaxis: { gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.08)' },
+    yaxis: { gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.08)' },
+    legend: { bgcolor: 'rgba(9,9,11,0.9)', bordercolor: 'rgba(255,255,255,0.07)', borderwidth: 1, font: { size: 11, color: '#a1a1aa' } },
 };
 
 window.PLOTLY_CONFIG = { responsive: true, displayModeBar: false };
@@ -236,7 +236,17 @@ async function apiFetch(url, options) {
 
 function darkLayout(overrides) {
     var base = JSON.parse(JSON.stringify(window.PLOTLY_DARK_LAYOUT));
-    return Object.assign(base, overrides || {});
+    if (!overrides) return base;
+    // Deep merge one level so axis/legend overrides inherit base gridcolor etc.
+    Object.keys(overrides).forEach(function (key) {
+        if (overrides[key] && typeof overrides[key] === 'object' && !Array.isArray(overrides[key]) &&
+            base[key] && typeof base[key] === 'object' && !Array.isArray(base[key])) {
+            Object.assign(base[key], overrides[key]);
+        } else {
+            base[key] = overrides[key];
+        }
+    });
+    return base;
 }
 
 // ---------------------------------------------------------------------------

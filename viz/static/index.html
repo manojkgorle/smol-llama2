@@ -3,21 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLaMA-2 Mechanistic Interpretability</title>
+    <meta name="color-scheme" content="dark">
+    <title>llama-scope | Mechanistic Interpretability</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
     <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
 </head>
 <body>
     <nav id="main-nav">
-        <div class="nav-title">LLaMA-2 Interpretability</div>
+        <div class="nav-title">llama-scope</div>
         <div class="nav-tabs">
-            <button class="nav-btn active" data-tab="dashboard">Training Dashboard</button>
-            <button class="nav-btn" data-tab="attention">Attention Inspector</button>
-            <button class="nav-btn" data-tab="activations">Activation Explorer</button>
-            <button class="nav-btn" data-tab="attribution">Logit Attribution</button>
+            <button class="nav-btn active" data-tab="dashboard">Dashboard</button>
+            <button class="nav-btn" data-tab="attention">Attention</button>
+            <button class="nav-btn" data-tab="activations">Activations</button>
+            <button class="nav-btn" data-tab="attribution">Attribution</button>
             <button class="nav-btn" data-tab="circuits">Circuits</button>
-            <button class="nav-btn" data-tab="captum">Captum Attribution</button>
+            <button class="nav-btn" data-tab="captum">Captum</button>
         </div>
     </nav>
 
@@ -53,7 +58,6 @@
         </section>
     </main>
 
-    <link rel="stylesheet" href="/static/css/style.css">
     <script src="/static/js/app.js"></script>
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/attention.js"></script>

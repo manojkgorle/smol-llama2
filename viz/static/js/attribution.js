@@ -118,7 +118,7 @@ function _renderTokenStrip(data) {
             });
         } else {
             // Last token has no target — dimmed
-            span.style.background = 'rgba(42,42,74,0.5)';
+            span.style.background = 'rgba(255,255,255,0.04)';
             span.style.cursor = 'default';
             span.title = 'pos ' + idx + ' (no target)';
         }
@@ -196,6 +196,8 @@ function _renderLogitLens(posData) {
     var container = document.getElementById('attr-logit-lens');
     if (!container) return;
 
+    var SHOW_K = 5;
+
     var depths = ['embedding'];
     for (var i = 0; i < window.N_LAYERS; i++) depths.push(String(i));
 
@@ -206,7 +208,7 @@ function _renderLogitLens(posData) {
 
     var html = '<table class="logit-lens-table">' +
         '<thead><tr>' +
-            '<th>Depth</th><th>Top Prediction</th><th>Prob</th><th>Target Token Logit</th>' +
+            '<th>Depth</th><th>Top-' + SHOW_K + ' Predictions</th><th>Target Logit</th>' +
         '</tr></thead><tbody>';
 
     var prevLogit = null;
@@ -216,10 +218,6 @@ function _renderLogitLens(posData) {
         var preds = posData.cumulative_predictions[key];
         var contrib = posData.layer_contributions[key];
 
-        var topPred = preds && preds.length > 0 ? preds[0] : null;
-        var topToken = topPred ? topPred.token : '?';
-        var topProb = topPred ? topPred.prob : 0;
-
         // Cumulative target logit (sum of contributions up to this depth)
         if (prevLogit === null) {
             prevLogit = contrib;
@@ -227,13 +225,27 @@ function _renderLogitLens(posData) {
             prevLogit = prevLogit + contrib;
         }
 
-        var matchesTarget = topToken === target;
-        var tdClass = matchesTarget ? ' class="highlight-token"' : '';
+        // Build prediction pills for top-K
+        var pillsHtml = '';
+        var k = preds ? Math.min(preds.length, SHOW_K) : 0;
+        for (var p = 0; p < k; p++) {
+            var pred = preds[p];
+            var isTarget = pred.token === target;
+            var isTop = p === 0;
+            var cls = 'lens-pill';
+            if (isTarget) cls += ' lens-pill-target';
+            if (isTop) cls += ' lens-pill-top';
+            pillsHtml +=
+                '<span class="' + cls + '">' +
+                    '<span class="lens-pill-token">' + escapeHtml(pred.token) + '</span>' +
+                    '<span class="lens-pill-prob">' + (pred.prob * 100).toFixed(1) + '%</span>' +
+                '</span>';
+        }
+        if (k === 0) pillsHtml = '<span class="lens-pill"><span class="lens-pill-token">?</span></span>';
 
         html += '<tr>' +
             '<td>' + escapeHtml(depthLabels[d]) + '</td>' +
-            '<td' + tdClass + '>' + escapeHtml(topToken) + '</td>' +
-            '<td>' + (topProb * 100).toFixed(2) + '%</td>' +
+            '<td class="lens-preds-cell"><div class="lens-preds-wrap">' + pillsHtml + '</div></td>' +
             '<td>' + prevLogit.toFixed(3) + '</td>' +
         '</tr>';
     }
@@ -251,7 +263,7 @@ function _renderLayerContributions(posData) {
 
     var labels = ['Emb'];
     var values = [lc['embedding'] || 0];
-    var colors = ['#8892a4'];
+    var colors = ['#71717a'];
 
     for (var i = 0; i < window.N_LAYERS; i++) {
         labels.push('L' + i);
@@ -270,8 +282,8 @@ function _renderLayerContributions(posData) {
             text: 'Layer Contributions to target "' + escapeHtml(posData.target) + '" at pos ' + posData.position,
             font: { size: 14 },
         },
-        xaxis: { title: 'Layer', gridcolor: '#2a2a4a' },
-        yaxis: { title: 'Marginal Logit Contribution', gridcolor: '#2a2a4a' },
+        xaxis: { title: 'Layer', gridcolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Marginal Logit Contribution', gridcolor: 'rgba(255,255,255,0.06)' },
         margin: { t: 44, b: 48 },
     }), window.PLOTLY_CONFIG);
 }
@@ -327,17 +339,17 @@ function _renderDLA(data) {
         x: xLabels,
         y: yLabels,
         colorscale: [
-            [0, '#e94560'],
-            [0.5, '#1a1a2e'],
-            [1, '#4ecca3'],
+            [0, '#f87171'],
+            [0.5, '#0a0a0f'],
+            [1, '#34d399'],
         ],
         zmid: 0,
         colorbar: { title: { text: 'Logit', side: 'right' }, tickfont: { size: 11 } },
         hovertemplate: '%{y} %{x}<br>Contribution: %{z:.4f}<extra></extra>',
     }], darkLayout({
         title: { text: 'Per-Head Logit Attribution (layers x heads)', font: { size: 14 } },
-        xaxis: { title: 'Head', side: 'bottom', gridcolor: '#2a2a4a' },
-        yaxis: { title: 'Layer', autorange: 'reversed', gridcolor: '#2a2a4a' },
+        xaxis: { title: 'Head', side: 'bottom', gridcolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Layer', autorange: 'reversed', gridcolor: 'rgba(255,255,255,0.06)' },
         margin: { t: 44, b: 48, l: 56 },
     }), window.PLOTLY_CONFIG);
 
@@ -359,8 +371,8 @@ function _renderDLA(data) {
         hovertemplate: '%{x}<br>Contribution: %{y:.4f}<extra></extra>',
     }], darkLayout({
         title: { text: 'Per-FFN Logit Attribution', font: { size: 14 } },
-        xaxis: { title: 'Layer', gridcolor: '#2a2a4a' },
-        yaxis: { title: 'Logit Contribution', gridcolor: '#2a2a4a' },
+        xaxis: { title: 'Layer', gridcolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Logit Contribution', gridcolor: 'rgba(255,255,255,0.06)' },
         margin: { t: 44, b: 48 },
     }), window.PLOTLY_CONFIG);
 }

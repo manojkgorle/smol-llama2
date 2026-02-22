@@ -193,7 +193,7 @@ function _renderLossChart(steps, vals) {
             name: 'Train Loss',
             type: 'scatter',
             mode: 'lines',
-            line: { color: '#e94560', width: 2 },
+            line: { color: '#f87171', width: 2 },
             yaxis: 'y',
         },
         {
@@ -202,7 +202,7 @@ function _renderLossChart(steps, vals) {
             name: 'Perplexity',
             type: 'scatter',
             mode: 'lines',
-            line: { color: '#f0a500', width: 2, dash: 'dot' },
+            line: { color: '#fbbf24', width: 2, dash: 'dot' },
             yaxis: 'y2',
         },
     ];
@@ -214,26 +214,26 @@ function _renderLossChart(steps, vals) {
             name: 'Val Loss',
             type: 'scatter',
             mode: 'lines+markers',
-            line: { color: '#4ecca3', width: 2 },
-            marker: { size: 6, color: '#4ecca3' },
+            line: { color: '#34d399', width: 2 },
+            marker: { size: 6, color: '#34d399' },
             yaxis: 'y',
         });
     }
 
     var layout = darkLayout({
-        xaxis: { title: 'Step', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
-        yaxis: { title: 'Loss', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
+        xaxis: { title: 'Step', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Loss', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
         yaxis2: {
             title: 'Perplexity',
             overlaying: 'y',
             side: 'right',
-            gridcolor: 'rgba(42,42,74,0.3)',
+            gridcolor: 'rgba(255,255,255,0.03)',
             showgrid: false,
         },
         legend: {
             x: 0.01, y: 0.99,
-            bgcolor: 'rgba(22,33,62,0.8)',
-            bordercolor: '#2a2a4a',
+            bgcolor: 'rgba(9,9,11,0.9)',
+            bordercolor: 'rgba(255,255,255,0.06)',
             borderwidth: 1,
             font: { size: 11 },
         },
@@ -254,16 +254,16 @@ function _renderLRChart(steps) {
         y: steps.map(function (s) { return s.learning_rate; }),
         type: 'scatter',
         mode: 'lines',
-        line: { color: '#bb86fc', width: 2 },
+        line: { color: '#a78bfa', width: 2 },
         name: 'Learning Rate',
     }];
 
     var layout = darkLayout({
-        xaxis: { title: 'Step', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
+        xaxis: { title: 'Step', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
         yaxis: {
             title: 'Learning Rate',
-            gridcolor: '#2a2a4a',
-            zerolinecolor: '#2a2a4a',
+            gridcolor: 'rgba(255,255,255,0.06)',
+            zerolinecolor: 'rgba(255,255,255,0.06)',
             tickformat: '.1e',
         },
         showlegend: false,
@@ -284,13 +284,13 @@ function _renderGradChart(steps) {
         y: steps.map(function (s) { return s.grad_norm; }),
         type: 'scatter',
         mode: 'lines',
-        line: { color: '#ff6b6b', width: 2 },
+        line: { color: '#fb923c', width: 2 },
         name: 'Grad Norm',
     }];
 
     var layout = darkLayout({
-        xaxis: { title: 'Step', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
-        yaxis: { title: 'Gradient Norm', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
+        xaxis: { title: 'Step', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Gradient Norm', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
         showlegend: false,
     });
 
@@ -331,12 +331,12 @@ function _renderResidualChart(steps) {
     }
 
     var layout = darkLayout({
-        xaxis: { title: 'Step', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
-        yaxis: { title: 'Residual Norm', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
+        xaxis: { title: 'Step', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
+        yaxis: { title: 'Residual Norm', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
         legend: {
             x: 1.02, y: 1,
-            bgcolor: 'rgba(22,33,62,0.8)',
-            bordercolor: '#2a2a4a',
+            bgcolor: 'rgba(9,9,11,0.9)',
+            bordercolor: 'rgba(255,255,255,0.06)',
             borderwidth: 1,
             font: { size: 10 },
         },
@@ -379,17 +379,17 @@ function _renderGateSparsityChart(steps) {
     }
 
     var layout = darkLayout({
-        xaxis: { title: 'Step', gridcolor: '#2a2a4a', zerolinecolor: '#2a2a4a' },
+        xaxis: { title: 'Step', gridcolor: 'rgba(255,255,255,0.06)', zerolinecolor: 'rgba(255,255,255,0.06)' },
         yaxis: {
             title: 'Gate Sparsity (fraction near-zero)',
-            gridcolor: '#2a2a4a',
-            zerolinecolor: '#2a2a4a',
+            gridcolor: 'rgba(255,255,255,0.06)',
+            zerolinecolor: 'rgba(255,255,255,0.06)',
             range: [0, 1],
         },
         legend: {
             x: 1.02, y: 1,
-            bgcolor: 'rgba(22,33,62,0.8)',
-            bordercolor: '#2a2a4a',
+            bgcolor: 'rgba(9,9,11,0.9)',
+            bordercolor: 'rgba(255,255,255,0.06)',
             borderwidth: 1,
             font: { size: 10 },
         },
